@@ -34,6 +34,7 @@ spring:
     #       多个连接,多个channel
     #       mode: connection
 
+# pagehelper 分页插件
 
 
     # 打印SQL
@@ -43,7 +44,7 @@ spring:
 
     mybatis:
       # XML扫描路径
-      mapper-locations: classpath:mapper/**/*.xml
+      mapper-locations: classpath:*/mapper/*.xml
       # 通用Mapper的方法会自动转换驼峰，但手写的SQL需要开启才能转换
       configuration:
         map-underscore-to-camel-case: on

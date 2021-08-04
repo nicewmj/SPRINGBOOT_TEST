@@ -150,9 +150,42 @@
             <artifactId>spring-boot-starter-aop</artifactId>
            <version>2.2.1.RELEASE</version>
         </dependency>
+        <!--mybatis-plus  可以实体类上使用 @TableName("sys_user_log") 注解高效开发-->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-boot-starter</artifactId>
+            <version>3.2.0</version>
+        </dependency>
+
     </dependencies>
 
     <build>
+        <!--第一种方法：这个 resources 可以让你的xml文件跟 mapper接口写在一起 然后被编译到 -->
+        <!--第二种方法：在 application.yml 中配置  mybatis:
+                                      # XML扫描路径
+                                      mapper-locations: classpath:*/mapper/*.xml
+                                然后把mappper 的包写在resources 目录下面
+                                      -->
+       <!-- <resources>
+            <resource>
+                <directory>src/main/java</directory>
+                <includes>
+                    <include>**/*.xml</include>
+                    <include>**/*.yml</include>
+                    <include>**/*.properties</include>
+                </includes>
+                <filtering>false</filtering>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <includes>
+                    <include>**/*.yml</include>
+                    <include>**/*.properties</include>
+                    <include>**/*.xml</include>
+                </includes>
+                <filtering>false</filtering>
+            </resource>
+        </resources>-->
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

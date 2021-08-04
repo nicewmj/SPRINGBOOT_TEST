@@ -8,6 +8,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * aop 日志的打印
+ */
 @RestController
 public class TestAOPController {
 
@@ -21,16 +24,24 @@ public class TestAOPController {
         return list;
     }
 
+    /**
+     *  @ApiLog
+     * 给需要打印日志的接口方法加@ApiLog
+     * @return
+     */
     @PostMapping("addTest2")
     @ApiLog
     public Boolean addTest2(@RequestBody Map<String,Object> paramsMap) {
         return true;
     }
 
-
+    /**
+     * 不打印日志
+     *   @IgnoreApiLog
+     */
     @PostMapping("addTest3")
     @ApiLog
-    @IgnoreApiLog
+    @IgnoreApiLog//忽略排除日志 在切点里面定义有判断
     public Boolean addTest3(@RequestBody Map<String,Object> paramsMap) {
         return true;
     }

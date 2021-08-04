@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.mapper.UserLogMapper">
+
+
+    <insert id="insertUserLog"  parameterType="com.example.entity.UserLogDO">
+        insert into sys_user_log
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="moduleCode != null">
+                module_code,
+            </if>
+            <if test="type != null">
+                type,
+            </if>
+            <if test="title != null">
+                title,
+            </if>
+            <if test="operatorId != null">
+                operator_id,
+            </if>
+            operate_time,
+            <if test="content != null">
+                content,
+            </if>
+
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="moduleCode != null">
+                #{moduleCode},
+            </if>
+            <if test="type != null">
+                #{type},
+            </if>
+            <if test="title != null">
+                #{title},
+            </if>
+            <if test="operatorId != null">
+                #{operatorId},
+            </if>
+                SYSDATE(),
+            <if test="content != null">
+                #{content},
+            </if>
+
+        </trim>
+    </insert>
+
+
+</mapper>
