@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import javax.persistence.Id;
 import java.io.Serializable;
 import java.lang.annotation.Target;
+import java.util.Date;
 
 @Data
 @AllArgsConstructor
@@ -17,8 +18,13 @@ public class User implements Serializable {
 
     private String id;
     private String name;
+    private String password;
     private String gender;
     private Integer age;
     private String address;
+    private Date createTime;
+    private Date updateTime;
+    private Integer deleted;
+    private Integer userType;
 
 }

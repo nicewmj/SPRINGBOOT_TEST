@@ -1,1 +1,4 @@
-ss
+AnnotationUtils：一个好用的注解工具类
+在正式开始之前，我们来了解一下AnnotationUtils。
+它是Spring提供的一个注解工具类，提供了获取类上的注解、方法上的注解以及注解属性等便利的操作。
+你是否曾经疑惑过：Spring为什么能识别“叠加的注解”？比如，Spring如何识别@RestController？
