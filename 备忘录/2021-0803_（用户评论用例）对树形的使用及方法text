@@ -1,0 +1,118 @@
+# 这里给出较为可行的表设计：
+#为了方便展示时理清关系，这里我把user_id设置为VARCHAR，这样user_id就可以填入zhangsan、lisi，直观一些。
+
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- ----------------------------
+-- Table structure for t_comment
+-- ----------------------------
+DROP TABLE IF EXISTS `t_comment`;
+CREATE TABLE `t_comment` (
+  `id` int(11) NOT NULL AUTO_INCREMENT COMMENT '评论id',
+  `pid` int(11) DEFAULT NULL COMMENT '所属一级评论的id，如果当前评论为一级，则为0',
+  `target_id` int(11) NOT NULL COMMENT '评论所属文章id',
+  `content` varchar(255) COLLATE utf8mb4_bin NOT NULL COMMENT '评论内容',
+  `user_id` varchar(255) COLLATE utf8mb4_bin NOT NULL COMMENT '该条评论的作者',
+  `to_user_id` varchar(255) COLLATE utf8mb4_bin DEFAULT NULL COMMENT '对谁回复，一级评论可以为null',
+  `likes_count` int(11) DEFAULT '0' COMMENT '当前评论的点赞数',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `key_target_id` (`target_id`) USING BTREE,
+  KEY `key_pid` (`pid`) USING BTREE
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+-- ----------------------------
+-- Records of t_comment
+-- ----------------------------
+BEGIN;
+INSERT INTO `t_comment` VALUES (1, 0, 10086, '这是第一条评论。', 'zhangsan', NULL, 1, '2020-03-17 11:06:39', '2020-03-17 14:06:13');
+INSERT INTO `t_comment` VALUES (2, 0, 10086, '这是第二条评论。', 'lisi', NULL, 0, '2020-03-17 11:08:10', '2020-03-17 14:06:16');
+INSERT INTO `t_comment` VALUES (3, 2, 10086, '你好啊，第二条评论。', 'zhangsan', 'lisi', 2, '2020-03-17 11:08:56', '2020-03-17 11:43:37');
+INSERT INTO `t_comment` VALUES (4, 2, 10086, '哇，谢谢你的回复！', 'lisi', 'zhangsan', 0, '2020-03-17 11:09:57', '2020-03-17 12:02:40');
+INSERT INTO `t_comment` VALUES (5, 0, 10086, '楼上两个细佬...', 'wangwu', NULL, 0, '2020-03-17 11:10:24', '2020-03-17 14:06:20');
+INSERT INTO `t_comment` VALUES (6, 2, 10086, '回复一下而已，需要这么激动吗...', 'zhaoliu', 'lisi', 1, '2020-03-17 11:11:40', '2020-03-17 12:02:48');
+COMMIT;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+
+# 结果
+
+[ {
+  "id" : 1,
+  "pid" : 0,
+  "targetId" : 10086,
+  "content" : "这是第一条评论。",
+  "userId" : "zhangsan",
+  "toUserId" : null,
+  "likesCount" : 1,
+  "createTime" : "2020-03-17T11:06:39.000+0000",
+  "updateTime" : "2020-03-17T14:06:13.000+0000",
+  "replies" : [ ]
+}, {
+  "id" : 2,
+  "pid" : 0,
+  "targetId" : 10086,
+  "content" : "这是第二条评论。",
+  "userId" : "lisi",
+  "toUserId" : null,
+  "likesCount" : 0,
+  "createTime" : "2020-03-17T11:08:10.000+0000",
+  "updateTime" : "2020-03-17T14:06:16.000+0000",
+  "replies" : [ {
+    "id" : 3,
+    "pid" : 2,
+    "targetId" : 10086,
+    "content" : "你好啊，第二条评论。",
+    "userId" : "zhangsan",
+    "toUserId" : "lisi",
+    "likesCount" : 2,
+    "createTime" : "2020-03-17T11:08:56.000+0000",
+    "updateTime" : "2020-03-17T11:43:37.000+0000",
+    "replies" : [ ]
+  }, {
+    "id" : 4,
+    "pid" : 2,
+    "targetId" : 10086,
+    "content" : "哇，谢谢你的回复！",
+    "userId" : "lisi",
+    "toUserId" : "zhangsan",
+    "likesCount" : 0,
+    "createTime" : "2020-03-17T11:09:57.000+0000",
+    "updateTime" : "2020-03-17T12:02:40.000+0000",
+    "replies" : [ ]
+  }, {
+    "id" : 6,
+    "pid" : 2,
+    "targetId" : 10086,
+    "content" : "回复一下而已，需要这么激动吗...",
+    "userId" : "zhaoliu",
+    "toUserId" : "lisi",
+    "likesCount" : 1,
+    "createTime" : "2020-03-17T11:11:40.000+0000",
+    "updateTime" : "2020-03-17T12:02:48.000+0000",
+    "replies" : [ ]
+  } ]
+}, {
+  "id" : 5,
+  "pid" : 0,
+  "targetId" : 10086,
+  "content" : "楼上两个细佬...",
+  "userId" : "wangwu",
+  "toUserId" : null,
+  "likesCount" : 0,
+  "createTime" : "2020-03-17T11:10:24.000+0000",
+  "updateTime" : "2020-03-17T14:06:20.000+0000",
+  "replies" : [ ]
+} ]
+
+
+
+#备注
+而上面为了简单，JSON返回值中只有userId，并没有用户头像、昵称及个人简介。
+解决办法也简单，一般评论肯定会做分页，所以一次查询的数量是有限的，我们可以查询出commentList后，
+用之前封装的ConvertUtil#resultToList收集所有评论的userId，再调用UserService.listUserInfoByIdList()查询所有用户信息，
+此时内存中有commentList和userList，而它们都有userId，不用我说大家也知道怎么做啦。
