@@ -1,0 +1,160 @@
+在日常开发中，偶尔需要在主业务逻辑之外做一些附加操作，比如下单成功后通知商家、课程报名成功后通知老师、简历投递成功后通知HR。一般来讲，这些业务是不适合放在主线程中的：
+
+
+消息通知等附加操作为什么不适合放在主流程呢？
+• 首先，消息通知相对没那么重要，即使发送失败了，一般还有发送记录，重新发送或者只要能追溯即可
+• 其次，在主流程中加入消息通知会减慢响应速度
+• 最后，万一消息发送失败，还可能导致事务回滚，但系统本身其实是没有问题的
+
+一个解决办法是使用多线程，把消息发送的逻辑单独放在一个异步线程中执行，主流程处理完毕直接返回即可。为了尽可能简单，
+这里就不配置线程池或使用@Async了，换CompletableFuture做演示：
+
+@Slf4j
+@SpringBootTest
+public class AsyncNotifyTest {
+
+    @Test
+    public void testAsyncNotify() throws InterruptedException {
+
+        long start = System.currentTimeMillis();
+
+        // 投递简历，插入投递记录
+        TimeUnit.SECONDS.sleep(2);
+        log.info("插入投递记录完毕...");
+
+        // 异步发送短信通知HR，并留存发送记录
+        CompletableFuture.runAsync(() -> {
+            try {
+                notifyHR("bravo1988", "叉车师傅");
+                writeMsg("bravo1988", "叉车师傅");
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        });
+
+        log.info("耗时:{}毫秒", System.currentTimeMillis() - start);
+
+        // 为了观察到异步线程里的打印信息，主线程sleep一会儿
+        TimeUnit.SECONDS.sleep(2);
+    }
+
+    public void notifyHR(String username, String jobName) throws InterruptedException {
+        TimeUnit.SECONDS.sleep(1);
+        log.info("【发送消息】HR你好，用户:{}, 投递你的岗位:{}", username, jobName);
+    }
+
+    public void writeMsg(String username, String jobName) {
+        // 留存消息发送记录
+        log.info("【保存消息】保存到数据库, 用户:{}, 岗位:{}", username, jobName);
+    }
+
+}
+
+一：
+Spring事件监听机制
+具体请参考此处为语雀文档，点击链接查看：https://www.yuque.com/bravo1988/java/yrtlp0，本质上和多线程异步消息是一样的。
+
+
+二：
+Redis实现消息队列、
+上面多线程版本的异步消息其实已经挺不错了，但小概率的情况下可能会出现消息丢失（虽然当前情境下无所谓）：
+• 情况1：消息过多，线程数不够触发拒绝策略
+• 情况2：异步线程宕机了，消息丢失（类似于消费者挂了）
+此时可以考虑使用Redis做一个简单的消息队列，数据类型可以选择List。上面多线程版本的异步消息其实已经挺不错了，但小概率的情况下可能会出现消息丢失（虽然当前情境下无所谓）：
+                                     • 情况1：消息过多，线程数不够触发拒绝策略
+                                     • 情况2：异步线程宕机了，消息丢失（类似于消费者挂了）
+                                     此时可以考虑使用Redis做一个简单的消息队列，数据类型可以选择List。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
