@@ -17,10 +17,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.*;
 import org.junit.jupiter.api.Test;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.test.context.junit4.SpringRunner;
 
 import java.io.*;
 import java.math.BigDecimal;
@@ -31,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @SpringBootTest
+//@RunWith(SpringRunner.class)
 class DemoApplicationTests {
 
     @Autowired
@@ -42,6 +46,9 @@ class DemoApplicationTests {
     @Autowired
 
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private RedissonClient redissonClient;
 
 //    @Value("${spring.mail.username}")
 //    private String sender;
@@ -694,4 +701,68 @@ class DemoApplicationTests {
         }
 
     }*/
+
+//"===============================================================redis 锁   先启动redis 服务=============================================================================\n"
+    @Test
+    public void testRLock() throws InterruptedException {
+        new Thread(this::testLockOne).start();
+        new Thread(this::testLockTwo).start();
+
+        TimeUnit.SECONDS.sleep(200);
+    }
+
+    /**锁的逻辑写死，不由我们判断
+     * 但如果调用者不希望阻塞呢？他有可能想着：如果加锁失败，我就直接放弃。
+     * 是啊，毕竟尝试加锁的目的可能完全相反：
+     * • 在保证线程安全的前提下，尽量让所有线程都执行成功
+     * • 在保证线程安全的前提下，只让一个线程执行成功
+     * 前者适用于秒杀、下单等操作，希望尽最大努力达成；后者适用于定时任务，只要让一个节点去执行，没有获取锁的节点应该fast-fail（快速失败）。
+     * 也就是说，节点获锁失败后，理论上可以有各种各样的处理方式：
+     * • 阻塞等待
+     * • 直接放弃
+     * • 试N次再放弃
+     * • ...
+     * 但lock、lock(leaseTime, timeUnit)替我们写死了：阻塞等待。即使lock(leaseTime, unit)，其实也是阻塞等待，只不过不会像lock()一样不断续期。
+     * 究其原因，主要是lock()这些方法对于加锁失败的判断是在内部写死的：
+     */
+    public void testLockOne(){
+        try {
+            RLock lock = redissonClient.getLock("bravo1988_distributed_lock");
+            log.info("testLockOne尝试加锁...");
+                    //方法一
+                    //自己判断获取锁失败的逻辑
+              /*      boolean b = lock.tryLock();
+                    if (b) {
+                        // 业务操作...
+                    }*/
+
+            //方法二
+            // 调用立即结束，不阻塞
+            lock.lock();
+            log.info("testLockOne加锁成功...");
+            log.info("testLockOne业务开始...");
+            TimeUnit.SECONDS.sleep(50);
+            log.info("testLockOne业务结束...");
+            lock.unlock();
+            log.info("testLockOne解锁成功...");
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void testLockTwo()  {
+        try {
+            RLock lock = redissonClient.getLock("bravo1988_distributed_lock");
+            log.info("testLockTwo尝试加锁...");
+            lock.lock();
+            log.info("testLockTwo加锁成功...");
+            log.info("testLockTwo业务开始...");
+            TimeUnit.SECONDS.sleep(50);
+            log.info("testLockTwo业务结束...");
+            lock.unlock();
+            log.info("testLockTwo解锁成功...");
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
 }

@@ -1,0 +1,1320 @@
+================================================================上上上上上上上========================================================================
+
+不论面试还是实际工作中，Redis都是避无可避的技术点。在我心里，MySQL和Redis是衡量一个程序员是否“小有所成”的两把标尺。如果他能熟练使用MySQL和Redis，以小化大，充分利用现有资源出色地完成当下需求，说明他已经成长了。
+本篇文章我们一起来探讨Redis分布式锁相关的内容。
+说到锁，大家第一时间想到的应该是synchronized关键字或ReentrantLock，随即想到偏向锁、自旋锁、重量级锁或者CAS甚至AQS。一般来说，我不喜欢一下子引入这么多概念，可能会把问题弄复杂，但为了方便大家理解Redis分布式锁，这里稍微提一下。
+JVM锁
+所谓JVM锁，其实指的是诸如synchronized关键字或者ReentrantLock实现的锁。之所以统称为JVM锁，是因为我们的项目其实都是跑在JVM上的。理论上每一个项目启动后，就对应一片JVM内存，后续运行时数据的生离死别都在这一片土地上。
+什么是锁、怎么锁？
+明白了“JVM锁”名字的由来，我们再来聊什么是“锁”，以及怎么“锁”。
+有时候我们很难阐述清楚某个事物是什么，但很容易解释它能干什么，JVM锁也是这个道理。JVM锁的出现，就是为了解决线程安全问题。所谓线程安全问题，可以简单地理解为数据不一致（与预期不一致）。
+什么时候可能出现线程安全问题呢？
+当同时满足以下三个条件时，才可能引发线程安全问题：
+• 多线程环境
+• 有共享数据
+• 有多条语句操作共享数据/单条语句本身非原子操作（比如i++虽然是单条语句，但并非原子操作）
+比如线程A、B同时对int count进行+1操作（初始值假设为1），在一定的概率下两次操作最终结果可能为2，而不是3。
+那么加锁为什么能解决这个问题呢？
+如果不考虑原子性、内存屏障等晦涩的名词，加锁之所以能保证线程安全，核心就是“互斥”。所谓互斥，就是字面意思上的互相排斥。这里的“互相”是指谁呢？就是多线程之间！
+怎么实现多线程之间的互斥呢？
+引入“中间人”即可。
+注意，这是个非常简单且伟大的思想。在编程世界中，通过引入“中介”最终解决问题的案例不胜枚举，包括但不限于Spring、MQ。在码农之间，甚至流传着一句话：没有什么问题是引入中间层解决不了的。
+而JVM锁其实就是线程和线程彼此的“中间人”，多个线程在操作加锁数据前都必须征求“中间人”的同意：
+锁在这里扮演的角色其实就是守门员，是唯一的访问入口，所有的线程都要经过它的拷问。在JDK中，锁的实现机制最常见的就是两种，分别是两个派系：
+• synchronized关键字
+• AQS
+个人觉得synchronized关键字要比AQS难理解，但AQS的源码比较抽象。这里简要介绍一下Java对象内存结构和synchronized关键字的实现原理。
+Java对象内存结构
+要了解synchronized关键字，首先要知道Java对象的内存结构。强调一遍，是Java对象的内存结构。
+它的存在仿佛向我们抛出一个疑问：如果有机会解剖一个Java对象，我们能看到什么？
+右上图画了两个对象，只看其中一个即可。我们可以观察到，Java对象内存结构大致分为几块：
+• Mark Word（锁相关）
+• 元数据指针（class pointer，指向当前实例所属的类）
+• 实例数据（instance data，我们平常看到的仅仅是这一块）
+• 对齐（padding，和内存对齐有关）
+如果此前没有了解过Java对象的内存结构，你可能会感到吃惊：天呐，我还以为Java对象就只有属性和方法！
+是的，我们最熟悉实例数据这一块，而且以为只有这一块。也正是这个观念的限制，导致一部分初学者很难理解synchronized。比如初学者经常会疑惑：
+• 为什么任何对象都可以作为锁？
+• Object对象锁和类锁有什么区别？
+• synchronized修饰的普通方法使用的锁是什么？
+• synchronized修饰的静态方法使用的锁是什么？
+这一切的一切，其实都可以在Java对象内存结构中的Mark Word找到答案：
+很多同学可能是第一次看到这幅图，会感到有点懵，没关系，我也很头大，都一样的。
+Mark Word包含的信息还是蛮多的，但这里我们只需要简单地把它理解为记录锁信息的标记即可。上图展示的是32位虚拟机下的Java对象内存，如果你仔细数一数，会发现全部bit加起来刚好是32位。64位虚拟机下的结构大同小异，就不特别介绍。
+Mark Word从有限的32bit中划分出2bit，专门用作锁标志位，通俗地讲就是标记当前锁的状态。
+正因为每个Java对象都有Mark Word，而Mark Word能标记锁状态（把自己当做锁），所以Java中任意对象都可以作为synchronized的锁：
+synchronized(person){
+}
+synchronized(student){
+}
+所谓的this锁就是当前对象，而Class锁就是当前对象所属类的Class对象，本质也是Java对象。synchronized修饰的普通方法底层使用当前对象作为锁，synchronized修饰的静态方法底层使用Class对象作为锁。
+但如果要保证多个线程互斥，最基本的条件是它们使用同一把锁：
+对同一份数据加两把不同的锁是没有意义的，实际开发时应该注意避免下面的写法：
+synchronized(Person.class){
+    // 操作count
+}
+synchronized(person){
+    // 操作count
+}
+或者
+public synchronized void method1(){
+    // 操作count
+}
+public static synchronized void method1(){
+    // 操作count
+}
+synchronized与锁升级
+大致介绍完Java对象内存结构后，我们再来解决一个新疑问：
+为什么需要标记锁的状态呢？是否意味着synchronized锁有多种状态呢？
+在JDK早期版本中，synchronized关键字的实现是直接基于重量级锁的。只要我们在代码中使用了synchronized，JVM就会向操作系统申请锁资源（不论当前是否真的是多线程环境），而向操作系统申请锁是比较耗费资源的，其中涉及到用户态和内核态的切换等，总之就是比较费事，且性能不高。
+JDK为了解决JVM锁性能低下的问题，引入了ReentrantLock，它基于CAS+AQS，类似自旋锁。自旋的意思就是，在发生锁竞争的时候，未争取到锁的线程会在门外采取自旋的方式等待锁的释放，谁抢到谁执行。
+自旋锁的好处是，不需要兴师动众地切换到内核态申请操作系统的重量级锁，在JVM层面即可实现自旋等待。但世界上并没有百利而无一害的灵丹妙药，CAS自旋虽然避免了状态切换等复杂操作，却要耗费部分CPU资源，尤其当可预计上锁的时间较长且并发较高的情况下，会造成几百上千个线程同时自旋，极大增加CPU的负担。
+synchronized毕竟JDK亲儿子，所以大概在JDK1.6或者更早期的版本，官方对synchronized做了优化，提出了“锁升级”的概念，把synchronized的锁划分为多个状态，也就是上图中提到的：
+• 无锁
+• 偏向锁
+• 轻量级锁（自旋锁）
+• 重量级锁
+无锁就是一个Java对象刚new出来的状态。当这个对象第一次被一个线程访问时，该线程会把自己的线程id“贴到”它的头上（Mark Word中部分位数被修改），表示“你是我的”：
+此时是不存在锁竞争的，所以并不会有什么阻塞或等待。
+为什么要设计“偏向锁”这个状态呢？
+大家回忆一下，项目中并发的场景真的这么多吗？并没有吧。大部分项目的大部分时候，某个变量都是单个线程在执行，此时直接向操作系统申请重量级锁显然没有必要，因为根本不会发生线程安全问题。
+而一旦发生锁竞争时，synchronized便会在一定条件下升级为轻量级锁，可以理解为一种自旋锁，具体自旋多少次以及何时放弃自旋，JDK也有一套相关的控制机制，大家可以自行了解。
+同样是自旋，所以synchronized也会遇到ReentrantLock的问题：如果上锁时间长且自旋线程多，又该如何？
+此时就会再次升级，变成传统意义上的重量级锁，本质上操作系统会维护一个队列，用空间换时间，避免多个线程同时自旋等待耗费CPU性能，等到上一个线程结束时唤醒等待的线程参与新一轮的锁竞争即可。
+拓展阅读（没太大必要）：
+线程安全(中)--彻底搞懂synchronized(从偏向锁到重量级锁)
+死磕Synchronized底层实现--偏向锁
+synchronized案例
+让我们一起来看几个案例，加深对synchronized的理解。
+• 同一个类中的synchronized method m1和method m2互斥吗？
+t1线程执行m1方法时要去读this对象锁，但是t2线程并不需要读锁，两者各管各的，没有交集（不共用一把锁）
+• 同一个类中synchronized method m1中可以调用synchronized method m2吗？
+synchronized是可重入锁，可以粗浅地理解为同一个线程在已经持有该锁的情况下，可以再次获取锁，并且会在某个状态量上做+1操作（ReentrantLock也支持重入）
+• 子类同步方法synchronized method m可以调用父类的synchronized method m吗？
+子类对象初始化前，会调用父类构造方法，在结构上相当于包裹了一个父类对象，用的都是this锁对象
+• 静态同步方法和非静态同步方法互斥吗？
+各玩各的，不是同一把锁，谈不上互斥
+Redis分布式锁的概念
+谈到Redis分布式锁，总是会有这样或那样的疑问：
+• 什么是分布式
+• 什么是分布式锁
+• 为什么需要分布式锁
+• Redis如何实现分布式锁
+前3个问题其实可以一起回答，至于Redis如何实现分布式锁，我们放在下一篇。
+什么是分布式？这是个很复杂的概念，我也很难说准确，所以干脆画个图，大家各花入各眼吧：
+分布式有个很显著的特点是，Service A和Service B极有可能并不是部署在同一个服务器上，所以它们也不共享同一片JVM内存。而上面介绍了，要想实现线程互斥，必须保证所有访问的线程使用的是同一把锁（JVM锁此时就无法保证互斥）。
+对于分布式项目，有多少台服务器就有多少片JVM内存，即使每片内存中各设置一把“独一无二”的锁，从整体来看项目中的锁就不是唯一的。
+此时，如何保证每一个JVM上的线程共用一把锁呢？
+答案是：把锁抽取出来，让线程们在同一片内存相遇。
+但锁是不能凭空存在的，本质还是要在内存中，此时可以使用Redis缓存作为锁的宿主环境，这就是Redis能构造分布式锁的原因。
+Redis的锁长啥样
+synchronized关键字和ReentrantLock，它们都是实实在在已经实现的锁，而且还有标志位啥的。但Redis就是一个内存...怎么作为锁呢?
+有一点大家要明确，Redis之所以能用来做分布式锁，肯定不只是因为它是一片内存，否则JVM本身也占有内存，为什么无法自己实现分布式锁呢？
+我个人的理解是，要想自定义一个分布式锁，必须至少满足几个条件：
+• 多进程可见（独立于多节点系统之外的一片内存）
+• 互斥（可以通过单线程，也可以通过选举机制）
+• 可重入
+以上三点Redis都能满足。在上面三个条件下，其实怎么设计锁，完全取决于个人如何定义锁。就好比现实生活中，通常我们理解的锁就是有个钥匙孔、需要插入钥匙的金属小物件。然而锁的形态可不止这么一种，随着科技的发展，什么指纹锁、虹膜锁层出不穷，但归根结底它们之所以被称为“锁”，是因为都保证了“互斥”（我行，你不行）。
+如果我们能设计一种逻辑，它能造成某个场景下的“互斥事件”，那么它就可以被称为“锁”。比如，某家很有名的网红店，一天只接待一位客人。门口没有营业员，就放了一台取号机，里面放了一张票。你如果去迟了，票就没了，你就进不了这家店。这个场景下，没票的顾客进不去，被锁在门外。此时，取票机造成了“互斥事件”，那么它就可以叫做“锁”。
+而Redis提供了setnx指令，如果某个key当前不存在则设置成功并返回true，否则不再重复设置，直接返回false。这不就是编程界的取号机吗？当然，实际用到的命令可不止这一个，具体如何实现，请看下一篇~
+这一篇从JVM锁聊到了Redis分布式锁，还介绍了Java的对象内存结构及synchronized底层的原理，相信大家对“锁”已经有了自己的感性认识。下一篇我们将通过分布式定时任务的案例介绍Redis分布式锁的使用场景。
+下次见。
+思考一个问题：分布式系统是否一定要分布式锁？
+分布式系统如果要加锁是否一定要使用分布式锁呢？
+可能未必。
+如果你需要的是写锁，那么可能确实需要分布式锁保证单一线程处理数据，而如果是为了防止缓存击穿（热点数据定时失效），那么使用JVM本地锁也没有太大关系。比如某个服务有10个节点，在使用JVM锁的情况下，即使某一时刻每个节点各自涌入1000个请求，虽然总共有1w个请求，但最终打到数据库的也只有10个，数据库层面是完全可以抗住这点请求量的，又由于本身是查询，所以不会造成线程安全问题。
+
+
+
+
+================================================================中中中中中中中中中========================================================================
+备注：本章节介绍使用
+    在本项目的跟目录下，有 redis_lock_copy 和 redis_lock_copy2 两个项目启动在控制台可以看到锁的获取
+    只有一个定时任务能去数据库拉取任务并且成功
+
+
+
+
+我们在不久前介绍了SpringBoot定时任务，最近又一起探究了如何使用Redis实现简单的消息队列，都是一些不错的小知识点。为了能跟前面的内容产生联动，这次我们打算把Redis分布式锁相关的介绍融合进定时任务的案例中，学起来更带劲~
+Demo构思
+在我看来，同样需要使用锁，动机可能完全相反：
+• 在保证线程安全的前提下，尽量让所有线程都执行成功
+• 在保证线程安全的前提下，只让一个线程执行成功
+前者适用于秒杀等场景。作为商家，当然希望在不发生线程安全问题的前提下，让每一个订单都生效，直到商品售罄。此时分布式锁的写法可以是“不断重试”或“阻塞等待”，即：递归或while true循环尝试获取、阻塞等待。
+而后者适用于分布式系统或多节点项目的定时任务，比如同一份代码部署在A、B两台服务器上，而数据库共用同一个。如果不做限制，那么在同一时刻，两台服务器都会去拉取列表执行，会发生任务重复执行的情况。
+此时可以考虑使用分布式锁，在cron触发的时刻只允许一个线程去往数据库拉取任务：
+在实现Redis分布式锁控制定时任务唯一性的同时，我们引入之前的Redis消息队列。注意，这与Redis分布式锁本身无关，就是顺便复习一遍Redis消息队列而已，大家可以只实现Redis分布式锁+定时任务的部分。
+整个Demo的结构大致如图：
+当然，实际项目中一般是这样的：
+分布式锁为什么难设计？
+首先，要和大家说一下，但凡牵涉到分布式的处理，没有一个是简单的，上面的Demo设计也不过是玩具，用来启发 大家的思路。
+为什么要把Demo设计得这么复杂呢？哈哈，因为这是我在上一家公司自己设计的，遇到了很多坑...拿出来自嘲一番，与各位共勉。
+我当时的设计思路是：
+由于小公司没有用什么Elastic-Job啥的，就是很普通的多节点部署。为了避免任务重复执行，我想设计一个分布式锁。但因为当时根本不知道Redisson，所以就自己百度了Redis实现分布式锁的方式，然后依葫芦画瓢自己手写了一个 。
+但我写完Redis分布式锁后，在实际测试过程中发现还需要考虑锁的失效时间...
+这里有两个问题：
+• 为什么要设置锁的过期时间？
+• 锁的过期时间设置多久合适？
+最简单的实现方案是这样的，一般没问题：
+但极端的情况下（项目在任务进行时重启或意外宕机），可能当前任务来不及解锁就挂了（死锁），那么下一个任务就会一直被锁在方法外等待。就好比厕所里有人被熏晕了，没法开门，而外面的人又进不去...
+此时需要装一个自动解锁的门，到时间自动开门，也就是要给锁设置一个过期时间。但紧接着又会有第二个问题：锁的失效时间设多长合适？
+很难定。
+因为随着项目的发展，定时任务的执行时间很可能是变化的。
+如果设置时间过长，极端点，定为365天。假设任务正常执行，比如10分钟就结束，那么线程继续往下就会执行unLock()主动解锁。但万一和上面一样宕机了，那么这个锁就要等365天后才解开。注意，宕机可不像JVM异常，它压根不会去执行finally里的unLock()。这种情况好比有个人在厕所里上大号直接掉坑里了，而自动门默认365天打开…所以，锁过期时间设置过长的坏处，本质是一旦发生宕机来不及解锁，那么过期时间越长，影响面越广，会导致其他操作阻滞。
+如果设置时间过短，上一个人还没拉完，门就“咔嚓”一声开了，尴尬不，重复执行了。
+终上所述，我当时之所以设计得这么复杂，就是想尽量缩短任务执行的时间，让它尽可能短（拉取后直接丢给队列，自己不处理），这样锁的时间一般设置30分钟就没啥问题。另外，对于死锁问题，我当时没有考虑宕机的情况，只考虑了意外重启…问题还有很多，文末会再总结。
+请大家阅读下面代码时思考两个问题：
+• Demo如何处理锁的过期时间
+• Demo如何防止死锁
+项目搭建
+新建一个空的SpringBoot项目。
+拷贝下方代码，构建工程：
+构建完以后，拷贝一份，修改端口号为8081，避免和原先的冲突
+统一管理Redis Key：RedisKeyConst
+/**
+ * 统一管理Redis Key
+ *
+ * @author qiyu
+ */
+public final class RedisKeyConst {
+    /**
+     * 分布式锁的KEY
+     */
+    public static final String RESUME_PULL_TASK_LOCK = "resume_pull_task_lock";
+    /**
+     * 简历异步解析任务队列
+     */
+    public static final String RESUME_PARSE_TASK_QUEUE = "resume_parse_task_queue";
+}
+Redis消息队列：RedisMessageQueueConsumer
+/**
+ * 消费者，异步获取简历解析结果并存入数据库
+ *
+ * @author qiyu
+ */
+@Slf4j
+@Component
+public class RedisMessageQueueConsumer implements ApplicationListener<ContextRefreshedEvent> {
+    @Autowired
+    private RedisService redisService;
+    @Autowired
+    private AsyncResumeParser asyncResumeParser;
+    @Autowired
+    private ObjectMapper objectMapper;
+    @Override
+    public void onApplicationEvent(ContextRefreshedEvent event) {
+        log.info("开始监听RedisMessageQueue...");
+        CompletableFuture.runAsync(() -> {
+            // 大循环，不断监听队列任务（阻塞式）
+            while (true) {
+                // 阻塞监听
+                ResumeCollectionDTO resumeCollectionDTO = (ResumeCollectionDTO) redisService.popQueue(RedisKeyConst.RESUME_PARSE_TASK_QUEUE, 5, TimeUnit.SECONDS);
+                if (resumeCollectionDTO != null) {
+                    int rePullCount = 0;
+                    int retryCount = 0;
+                    log.info("从队列中取出:{}", resumeCollectionDTO.getName());
+                    log.info(">>>>>>>>>>>>>>>>>>>开始拉取简历:{}", resumeCollectionDTO.getName());
+                    Long asyncPredictId = resumeCollectionDTO.getAsyncPredictId();
+                    // 小循环，针对每一个任务多次调用第三方接口，直到获取最终结果或丢弃任务
+                    while (true) {
+                        try {
+                            PredictResult result = asyncResumeParser.getResult(asyncPredictId);
+                            rePullCount++;
+                            // 如果已经解析完毕
+                            if (result.getStatus() == 2) {
+                                // 保存数据库
+                                try {
+                                    log.info("简历:{}解析成功", resumeCollectionDTO.getName());
+                                    log.info("resultJson:{}", result.getResultJson());
+                                    ResumeCollectionDO resumeCollectionDO = objectMapper.readValue(result.getResultJson(), ResumeCollectionDO.class);
+                                    log.info("<<<<<<<<<<<<<<<<<<<保存简历:{}到数据库", resumeCollectionDO);
+                                    // 归零
+                                    rePullCount = 0;
+                                    retryCount = 0;
+                                    break;
+                                } catch (Exception e) {
+                                    discardTask(resumeCollectionDTO);
+                                    log.info("<<<<<<<<<<<<<<<<<<<保存简历失败，丢弃任务");
+                                    rePullCount = 0;
+                                    retryCount = 0;
+                                    break;
+                                }
+                            }
+                            // 远程服务还未解析完毕，重试
+                            else {
+                                try {
+                                    if (rePullCount <= 3) {
+                                        // 前3次重试，时间为1s间隔
+                                        TimeUnit.SECONDS.sleep(1);
+                                        log.info("简历:{}尚未解析完毕, 准备进行第{}次重试, 停顿1s后进行", resumeCollectionDTO.getName(), rePullCount);
+                                    } else if (rePullCount > 3 && rePullCount <= 6) {
+                                        // 说明任务比较耗时，加长等待时间
+                                        TimeUnit.SECONDS.sleep(2);
+                                        log.info("简历:{}尚未解析完毕, 准备进行第{}次重试, 停顿2s后进行", resumeCollectionDTO.getName(), rePullCount);
+                                    } else if (rePullCount > 6 && rePullCount <= 8) {
+                                        // 说明任务比较耗时，加长等待时间
+                                        TimeUnit.SECONDS.sleep(3);
+                                        log.info("简历:{}尚未解析完毕, 准备进行第{}次重试, 停顿3s后进行", resumeCollectionDTO.getName(), rePullCount);
+                                    } else {
+                                        discardTask(resumeCollectionDTO);
+                                        log.info("<<<<<<<<<<<<<<<<<<<多次拉取仍未得到结果, 丢弃简历:{}", resumeCollectionDTO.getName());
+                                        retryCount = 0;
+                                        rePullCount = 0;
+                                        break;
+                                    }
+                                } catch (InterruptedException e) {
+                                    discardTask(resumeCollectionDTO);
+                                    log.info("<<<<<<<<<<<<<<<<<<<任务中断异常, 简历:{}", resumeCollectionDTO.getName());
+                                    rePullCount = 0;
+                                    retryCount = 0;
+                                    break;
+                                }
+                            }
+                        } catch (Exception e) {
+                            if (retryCount > 3) {
+                                discardTask(resumeCollectionDTO);
+                                log.info("<<<<<<<<<<<<<<<<<<<简历:{}重试{}次后放弃, rePullCount:{}, retryCount:{}", resumeCollectionDTO.getName(), retryCount, rePullCount, retryCount);
+                                rePullCount = 0;
+                                retryCount = 0;
+                                break;
+                            }
+                            retryCount++;
+                            log.info("简历:{}远程调用异常, 准备进行第{}次重试...", resumeCollectionDTO.getName(), retryCount);
+                        }
+                    }
+                    log.info("break......");
+                }
+            }
+        });
+    }
+    private void discardTask(ResumeCollectionDTO task) {
+        // 根据asyncPredictId删除任务...
+        log.info("丢弃任务:{}...", task.getName());
+    }
+}
+实体类：DO+DTO
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class ResumeCollectionDO {
+    /**
+     * 简历id
+     */
+    private Long id;
+    /**
+     * 简历名称
+     */
+    private String name;
+}
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class ResumeCollectionDTO implements Serializable {
+    /**
+     * 简历id
+     */
+    private Long id;
+    /**
+     * 异步解析id，稍后根据id可获取最终解析结果
+     */
+    private Long asyncPredictId;
+    /**
+     * 简历名称
+     */
+    private String name;
+}
+分布式锁：RedisService
+public interface RedisService {
+    /**
+     * 向队列插入消息
+     *
+     * @param queue 自定义队列名称
+     * @param obj   要存入的消息
+     */
+    void pushQueue(String queue, Object obj);
+    /**
+     * 从队列取出消息
+     *
+     * @param queue    自定义队列名称
+     * @param timeout  最长阻塞等待时间
+     * @param timeUnit 时间单位
+     * @return
+     */
+    Object popQueue(String queue, long timeout, TimeUnit timeUnit);
+    /**
+     * 尝试上锁
+     *
+     * @param lockKey
+     * @param value
+     * @param expireTime
+     * @param timeUnit
+     * @return
+     */
+    boolean tryLock(String lockKey, String value, long expireTime, TimeUnit timeUnit);
+    /**
+     * 根据MACHINE_ID解锁（只能解自己的）
+     *
+     * @param lockKey
+     * @param value
+     * @return
+     */
+    boolean unLock(String lockKey, String value);
+    /**
+     * 释放锁，不管是不是自己的
+     *
+     * @param lockKey
+     * @param value
+     * @return
+     */
+    boolean releaseLock(String lockKey, String value);
+}
+@Slf4j
+@Component
+public class RedisServiceImpl implements RedisService {
+    @Autowired
+    private RedisTemplate redisTemplate;
+    /**
+     * 向队列插入消息
+     *
+     * @param queue 自定义队列名称
+     * @param obj   要存入的消息
+     */
+    @Override
+    public void pushQueue(String queue, Object obj) {
+        redisTemplate.opsForList().leftPush(queue, obj);
+    }
+    /**
+     * 从队列取出消息
+     *
+     * @param queue    自定义队列名称
+     * @param timeout  最长阻塞等待时间
+     * @param timeUnit 时间单位
+     * @return
+     */
+    @Override
+    public Object popQueue(String queue, long timeout, TimeUnit timeUnit) {
+        return redisTemplate.opsForList().rightPop(queue, timeout, timeUnit);
+    }
+    /**
+     * 尝试上锁
+     *
+     * @param lockKey
+     * @param value
+     * @param expireTime
+     * @param timeUnit
+     * @return
+     */
+    @Override
+    public boolean tryLock(String lockKey, String value, long expireTime, TimeUnit timeUnit) {
+        Boolean lock = redisTemplate.opsForValue().setIfAbsent(lockKey, value);
+        if (Boolean.TRUE.equals(lock)) {
+            redisTemplate.expire(lockKey, expireTime, timeUnit);
+            return true;
+        } else {
+            return false;
+        }
+    }
+    /**
+     * 根据MACHINE_ID解锁（只能解自己的）
+     *
+     * @param lockKey
+     * @param value
+     * @return
+     */
+    @Override
+    public boolean unLock(String lockKey, String value) {
+        String machineId = (String) redisTemplate.opsForValue().get(lockKey);
+        if (StringUtils.isNotEmpty(machineId) && machineId.equals(value)) {
+            redisTemplate.delete(lockKey);
+            return true;
+        }
+        return false;
+    }
+    /**
+     * 释放锁，不管是不是自己的
+     *
+     * @param lockKey
+     * @param value
+     * @return
+     */
+    @Override
+    public boolean releaseLock(String lockKey, String value) {
+        Boolean delete = redisTemplate.delete(lockKey);
+        if (Boolean.TRUE.equals(delete)) {
+            log.info("Spring启动，节点:{}成功释放上次简历汇聚定时任务锁", value);
+            return true;
+        }
+        return false;
+    }
+}
+定时任务：ResumeCollectionTask
+@Slf4j
+@Component
+@EnableScheduling
+public class ResumeCollectionTask implements ApplicationListener<ContextRefreshedEvent> {
+    /**
+     * 当这份代码被部署到不同的服务器，启动时为每台机器分配一个唯一的机器ID
+     */
+    private static final String MACHINE_ID = IdUtil.randomUUID();
+    @Autowired
+    private RedisService redisService;
+    @Autowired
+    private AsyncResumeParser asyncResumeParser;
+    @Scheduled(cron = "0 */1 * * * ?")
+//    @Scheduled(fixedDelay = 60 * 1000L)
+    public void resumeSchedule() {
+        // 尝试上锁，返回true或false，锁的过期时间设置为10分钟（实际要根据项目调整，这也是自己实现Redis分布式锁的难点之一）
+        boolean lock = redisService.tryLock(RedisKeyConst.RESUME_PULL_TASK_LOCK, MACHINE_ID, 10, TimeUnit.MINUTES);
+        // 如果当前节点成功获取锁，那么整个系统只允许当前程序去MySQL拉取待执行任务
+        if (lock) {
+            log.info("节点:{}获取锁成功，定时任务启动", MACHINE_ID);
+            try {
+                collectResume();
+            } catch (Exception e) {
+                log.info("定时任务异常:", e);
+            } finally {
+                redisService.unLock(RedisKeyConst.RESUME_PULL_TASK_LOCK, MACHINE_ID);
+                log.info("节点:{}释放锁，定时任务结束", MACHINE_ID);
+            }
+        } else {
+            log.info("节点:{}获取锁失败，放弃定时任务", MACHINE_ID);
+        }
+    }
+    /**
+     * 任务主体：
+     * 1.从数据库拉取符合条件的HR邮箱
+     * 2.从HR邮箱拉取附件简历
+     * 3.调用远程服务异步解析简历
+     * 4.插入待处理任务到数据库，作为记录留存
+     * 5.把待处理任务的id丢到Redis Message Queue，让Consumer去异步处理
+     */
+    private void collectResume() throws InterruptedException {
+        // 跳过1、2两步，假设已经拉取到简历
+        log.info("节点:{}从数据库拉取任务简历", MACHINE_ID);
+        List<ResumeCollectionDO> resumeCollectionList = new ArrayList<>();
+        resumeCollectionList.add(new ResumeCollectionDO(1L, "张三的简历.pdf"));
+        resumeCollectionList.add(new ResumeCollectionDO(2L, "李四的简历.html"));
+        resumeCollectionList.add(new ResumeCollectionDO(3L, "王五的简历.doc"));
+        // 模拟数据库查询耗时
+        TimeUnit.SECONDS.sleep(3);
+        log.info("提交任务到消息队列:{}", resumeCollectionList.stream().map(ResumeCollectionDO::getName).collect(Collectors.joining(",")));
+        for (ResumeCollectionDO resumeCollectionDO : resumeCollectionList) {
+            // 上传简历异步解析，得到异步结果id
+            Long asyncPredictId = asyncResumeParser.asyncParse(resumeCollectionDO);
+            // 把任务插入数据库
+            // 略...
+            // 把任务丢到Redis Message Queue
+            ResumeCollectionDTO resumeCollectionDTO = new ResumeCollectionDTO();
+            BeanUtils.copyProperties(resumeCollectionDO, resumeCollectionDTO);
+            resumeCollectionDTO.setAsyncPredictId(asyncPredictId);
+            redisService.pushQueue(RedisKeyConst.RESUME_PARSE_TASK_QUEUE, resumeCollectionDTO);
+        }
+    }
+    /**
+     * 项目重启后先尝试删除之前的锁（如果存在），防止死锁等待
+     *
+     * @param event the event to respond to
+     */
+    @Override
+    public void onApplicationEvent(ContextRefreshedEvent event) {
+        redisService.releaseLock(RedisKeyConst.RESUME_PULL_TASK_LOCK, MACHINE_ID);
+    }
+}
+模拟第三方服务（异步）
+/**
+ * 第三方提供给的简历解析服务
+ *
+ * @author qiyu
+ */
+@Service
+public class AsyncResumeParser {
+    @Autowired
+    private ObjectMapper objectMapper;
+    /**
+     * 模拟分配异步任务结果id，不用深究，没啥意义，反正每个任务都会得到一个id，稍后根据id返回最终解析结果
+     */
+    private static final AtomicLong ASYNC_RESULT_ID = new AtomicLong(1000);
+    /**
+     * 解析结果
+     */
+    private static final Map<Long, String> results = new HashMap<>();
+    /**
+     * 模拟第三方服务异步解析，返回解析结果
+     *
+     * @param resumeCollectionDO
+     * @return
+     */
+    public Long asyncParse(ResumeCollectionDO resumeCollectionDO) {
+        long asyncPredictId = ASYNC_RESULT_ID.getAndIncrement();
+        try {
+            String resultJson = objectMapper.writeValueAsString(resumeCollectionDO);
+            results.put(asyncPredictId, resultJson);
+            return asyncPredictId;
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+        }
+        return -1L;
+    }
+    /**
+     * 根据异步id返回解析结果，但此时未必已经解析成功
+     * <p>
+     * 解析状态
+     * 0 初始化
+     * 1 处理中
+     * 2 调用成功
+     * 3 调用失败
+     *
+     * @param asyncPredictId
+     * @return
+     */
+    public PredictResult getResult(Long asyncPredictId) throws ParseErrorException, InterruptedException {
+        // 随机模拟异步解析的状态
+        int value = ThreadLocalRandom.current().nextInt(100);
+        if (value >= 85) {
+            // 模拟解析完成
+            TimeUnit.SECONDS.sleep(1);
+            String resultJson = results.get(asyncPredictId);
+            return new PredictResult(resultJson, 2);
+        } else if (value <= 5) {
+            // 模拟解析异常
+            TimeUnit.SECONDS.sleep(1);
+            throw new ParseErrorException("简历解析异常");
+        }
+        // 如果时间过短，返回status=1，表示解析中
+        TimeUnit.SECONDS.sleep(1);
+        return new PredictResult("", 1);
+    }
+}
+/**
+ * 解析异常
+ *
+ * @author qiyu
+ */
+public class ParseErrorException extends Exception {
+    /**
+     * Constructs a new exception with {@code null} as its detail message.
+     * The cause is not initialized, and may subsequently be initialized by a
+     * call to {@link #initCause}.
+     */
+    public ParseErrorException() {
+    }
+    /**
+     * Constructs a new exception with the specified detail message.  The
+     * cause is not initialized, and may subsequently be initialized by
+     * a call to {@link #initCause}.
+     *
+     * @param message the detail message. The detail message is saved for
+     *                later retrieval by the {@link #getMessage()} method.
+     */
+    public ParseErrorException(String message) {
+        super(message);
+    }
+}
+/**
+ * 第三方返回值
+ *
+ * @author qiyu
+ */
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class PredictResult {
+    /**
+     * 解析结果
+     */
+    private String resultJson;
+    /**
+     * 解析状态
+     * 0 初始化
+     * 1 处理中
+     * 2 调用成功
+     * 3 调用失败
+     */
+    private Integer status;
+}
+模拟异常
+在项目运行过程中，启动这个测试类的方法，即可观察不一样的现象。
+@SpringBootTest
+class RedisDistributedLockApplicationTests {
+    @Autowired
+    private RedisService redisService;
+    /**
+     * 作为失败案例（因为不存在777L这个解析任务，AsyncResumeParse.results会返回null）
+     * 观察RedisMessageQueueConsumer的处理方式
+     */
+    @Test
+    void contextLoads() {
+        ResumeCollectionDTO resumeCollectionDTO = new ResumeCollectionDTO();
+        resumeCollectionDTO.setId(666L);
+        resumeCollectionDTO.setAsyncPredictId(777L);
+        resumeCollectionDTO.setName("测试1号");
+        redisService.pushQueue(RedisKeyConst.RESUME_PARSE_TASK_QUEUE, resumeCollectionDTO);
+    }
+}
+pom.xml
+server:
+  port: 8080
+spring:
+  redis:
+    host: # 参考小册《阿里云账号》
+    password: # 参考小册《阿里云账号》
+    database: 2
+效果展示
+啥都不说了，都在jiu代码里了。大家自己拷贝到本地，动手玩一下，加深对Redis锁和Redis消息队列的理解。
+Kapture 2020-11-04 at 21.31.00.mp4
+只有一个定时任务能去数据库拉取任务，到时多节点部署大致是下面这样（redis一般是独立部署的，和节点代码无关）：
+后话
+上面展示的代码其实存在很多问题，我们会在下一篇指出并讨论解决方案。
+本文仅提供思路，开阔大家的眼界，千万别在自己项目中使用！！！！我当年被这个坑惨了，花里胡哨的，尤其Consumer里一大堆的sleep()，是非常low的！！
+对于异步调用的结果，不要循环等待，而应该分为几步：
+1. 调用异步接口，得到异步结果唯一id
+2. 将结果id保存到任务表中，作为一个任务
+3. 启动定时任务，根据id拉取最终结果（如果还没有结果，跳过当前任务，等下一个定时任务处理）
+分布式定时任务可以考虑xxl-job或elastic-job，分布式锁推荐使用redisson。
+
+
+
+
+================================================================下下下下下下下下下下========================================================================
+
+
+自定义Redis分布式锁的弊端
+在上一篇我们自定义了一个Redis分布式锁，用来解决多节点定时任务的拉取问题（避免任务重复执行）：
+但仍然存在很多问题：
+• 加锁操作不是原子性的（setnx和expire两步操作不是原子性的，中间宕机会导致死锁）
+public boolean tryLock(String lockKey, String value, long expireTime, TimeUnit timeUnit) {
+    // 1.先setnx
+    Boolean lock = redisTemplate.opsForValue().setIfAbsent(lockKey, value);
+    if (lock != null && lock) {
+        // 2.再expire
+        redisTemplate.expire(lockKey, expireTime, timeUnit);
+        return true;
+    } else {
+        return false;
+    }
+}
+当然啦，高版本的SpringBoot Redis依赖其实提供了加锁的原子性操作：
+/**
+ * 尝试上锁：setNX + expire
+ *
+ * @param lockKey    锁
+ * @param value      对应的值
+ * @param expireTime 过期时间
+ * @param timeUnit   时间单位
+ * @return
+ */
+@Override
+public boolean tryLock(String lockKey, String value, long expireTime, TimeUnit timeUnit) {
+    try {
+        // 可以设置4个参数，一步到位
+        redisTemplate.opsForValue().set(lockKey, value, expireTime, timeUnit);
+        return true;
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    return false;
+}
+从 Redis 2.6.12 版本开始（现在6.x了...）， SET 命令的行为可以通过一系列参数来修改，也因为 SET 命令可以通过参数来实现和 SETNX 、 SETEX 和 PSETEX 三个命令的效果，所以将来的 Redis 版本可能会废弃并最终移除 SETNX 、 SETEX 和 PSETEX 这三个命令。
+• 解锁操作不是原子性的（可能造成不同节点之间互相删锁）
+虽然上一篇设计的unLock()不是原子操作，但可以避免不同节点之间互相删锁
+public boolean unLock(String lockKey, String value) {
+    // 1.获取锁的value，存的是MACHINE_ID
+    String machineId = (String) redisTemplate.opsForValue().get(lockKey);
+    if (StringUtils.isNotEmpty(machineId) && machineId.equals(value)) {
+        // 2.只能删除当前节点设置的锁
+        redisTemplate.delete(lockKey);
+        return true;
+    }
+    return false;
+}
+• 畏难情绪作祟，不想考虑锁续期的问题，企图采用队列的方式缩减定时任务执行时间，直接把任务丢到队列中。但实际上可能存在任务堆积，个别情况下会出现：上次已经拉取某个任务并丢到Redis队列中，但由于队列比较繁忙，该任务还未被执行，数据库状态也尚未更改为status=1（已执行），结果下次又拉取一遍，重复执行（简单的解决策略是：虽然无法阻止入队，但是出队消费时可以判断where status=0后执行）
+引入Redis Message Queue会让系统变得更加复杂，我之前就因为使用了上面的模型导致各种偶发性的BUG，非常不好排查。一般来说，定时任务应该设计得简单点：
+也就是说，绕来绕去，想要设计一个较完备的Redis分布式锁，必须至少解决3个问题：
+• 加锁原子性（setnx和expire要保证原子性，否则会容易发生死锁）
+• 解锁原子性（不能误删别人的锁）
+• 需要考虑业务/定时任务执行的时间，并为锁续期
+如果不考虑性能啥的，加解锁原子性都可以通过lua脚本实现（利用Redis单线程的特性）：
+一次执行一个脚本，要么成功要么失败，不会和其他指令交错执行。
+最难的是如何根据实际业务的执行时间给锁续期！虽然我们已经通过判断MACHINE_ID避免了不同节点互相删除锁：
+但本质上我们需要的是：
+本文我们的主要目标就是实现锁续期！
+好在Redisson已经实现了，所以目标又变成：了解Redisson的锁续期机制。
+Redisson案例
+Redisson环境搭建
+server:
+  port: 8080
+spring:
+  redis:
+    host: # 见小册开头《阿里云服务账号》
+    password: # 见小册开头《阿里云服务账号》
+    database: 1
+
+# 调整控制台日志格式，稍微精简一些（非必要操作）
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %thread - %msg%n"
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.projectlombok</groupId>
+        <artifactId>lombok</artifactId>
+        <optional>true</optional>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+    <!--大家也可以单独引入Redisson依赖，然后通过@Configuration自己配置RedissonClient-->
+    <dependency>
+        <groupId>org.redisson</groupId>
+        <artifactId>redisson-spring-boot-starter</artifactId>
+        <version>3.13.6</version>
+    </dependency>
+</dependencies>
+然后就可以在test包下测试了~
+lock()方法初探
+@Slf4j
+@RunWith(SpringRunner.class)
+@SpringBootTest
+public class RLockTest {
+    @Autowired
+    private RedissonClient redissonClient;
+    @Test
+    public void testRLock() throws InterruptedException {
+        new Thread(this::testLockOne).start();
+        new Thread(this::testLockTwo).start();
+        TimeUnit.SECONDS.sleep(200);
+    }
+    public void testLockOne(){
+        try {
+            RLock lock = redissonClient.getLock("bravo1988_distributed_lock");
+            log.info("testLockOne尝试加锁...");
+            lock.lock();
+            log.info("testLockOne加锁成功...");
+            log.info("testLockOne业务开始...");
+            TimeUnit.SECONDS.sleep(50);
+            log.info("testLockOne业务结束...");
+            lock.unlock();
+            log.info("testLockOne解锁成功...");
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+    public void testLockTwo()  {
+        try {
+            RLock lock = redissonClient.getLock("bravo1988_distributed_lock");
+            log.info("testLockTwo尝试加锁...");
+            lock.lock();
+            log.info("testLockTwo加锁成功...");
+            log.info("testLockTwo业务开始...");
+            TimeUnit.SECONDS.sleep(50);
+            log.info("testLockTwo业务结束...");
+            lock.unlock();
+            log.info("testLockTwo解锁成功...");
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+}
+结果
+2020-11-21 14:24:33 - Thread-3 - testLockTwo尝试加锁...
+2020-11-21 14:24:33 - Thread-2 - testLockOne尝试加锁...
+=====> testLockOne()执行过程中，testLockTwo()一直阻塞 <=====
+2020-11-21 14:24:33 - Thread-2 - testLockOne加锁成功...
+2020-11-21 14:24:33 - Thread-2 - testLockOne业务开始...
+2020-11-21 14:25:23 - Thread-2 - testLockOne业务结束...
+2020-11-21 14:25:23 - Thread-2 - testLockOne解锁成功...
+=====> testLockOne()执行结束释放锁，testLockTwo()抢到锁 <=====
+2020-11-21 14:25:23 - Thread-3 - testLockTwo加锁成功...
+2020-11-21 14:25:23 - Thread-3 - testLockTwo业务开始...
+2020-11-21 14:26:13 - Thread-3 - testLockTwo业务结束...
+2020-11-21 14:26:13 - Thread-3 - testLockTwo解锁成功...
+通过上面的代码，我们有以下疑问：
+• lock()方法是原子性的吗？
+• lock()有设置过期时间吗？是多少？
+• lock()实现锁续期了吗？
+• lock()方法怎么实现阻塞的？又怎么被唤醒？
+先忘了这些，跟着我们走一遍lock()源码就明白了。
+lock()源码解析
+lock()加锁，去除异常的情况，无非加锁成功、加锁失败两种情况，我们先看加锁成功的情况。
+流程概览
+我们从这段最简单的代码入手：
+@Slf4j
+@RunWith(SpringRunner.class)
+@SpringBootTest
+public class RLockTest {
+    @Autowired
+    private RedissonClient redissonClient;
+
+    @Test
+    public void testLockSuccess() throws InterruptedException {
+        RLock lock = redissonClient.getLock("bravo1988_distributed_lock");
+        log.info("准备加锁...");
+        lock.lock();
+        log.info("加锁成功...");
+        TimeUnit.SECONDS.sleep(300);
+    }
+}
+大家跟着我们先打几个断点（SpringBoot2.3.4）：
+注意啊，把截图中能看到的断点都打上。
+OK，接着大家自己启动DEBUG，感受一下大致流程，然后看下面的注释：
+// redisson.lock()
+Override
+public void lock() {
+    try {
+        lock(-1, null, false);
+    } catch (InterruptedException e) {
+        throw new IllegalStateException();
+    }
+}
+// 为了方便辨认，我直接把传进来的参数写在参数列表上
+private void lock(long leaseTime=-1, TimeUnit unit=null, boolean interruptibly=false) throws InterruptedException {
+    // 获取当前线程id
+    long threadId = Thread.currentThread().getId();
+    // 尝试上锁。上锁成功返回null，上锁失败返回ttl
+    Long ttl = tryAcquire(-1, leaseTime=-1, unit=null, threadId=666);
+    // 上锁成功，方法结束，回到主线程执行业务啦（后台有个定时任务在给当前锁续期）
+    if (ttl == null) {
+        return;
+    }
+    // 上锁成功就不走下面的流程了，所以这里直接省略
+    // 略：加锁失败后续流程...
+}
+// 尝试上锁。上锁成功返回null，上锁失败返回【当前已经存在的锁】的ttl，方便调用者判断多久之后能重新获取锁
+private Long tryAcquire(long waitTime=-1, long leaseTime=-1, TimeUnit unit=null, long threadId=666) {
+    /**
+    * 有两次调用：1.tryAcquireAsync()返回Future 2.从Future获取异步结果（异步结果就是ttl）
+    * 重点是tryAcquireAsync()
+    */
+    return get(tryAcquireAsync(waitTime=-1, leaseTime=-1, unit=null, threadId=666));
+}
+// 获取过期时间（非重点）
+protected final <V> V get(RFuture<V> future) {
+    return commandExecutor.get(future);
+}
+// 重点，加锁后返回RFuture，内部包含ttl。调用本方法可能加锁成功，也可能加锁失败，外界可以通过ttl判断
+private <T> RFuture<Long> tryAcquireAsync(long waitTime=-1, long leaseTime=-1, TimeUnit unit=null, long threadId=666) {
+    // lock()默认leaseTime=-1，所以会跳过if
+    if (leaseTime != -1) {
+        return tryLockInnerAsync(waitTime, leaseTime, unit, threadId, RedisCommands.EVAL_LONG);
+    }
+    // 执行lua脚本，尝试加锁并返回RFuture。这个方法是异步的，其实是把任务提交给线程池
+    RFuture<Long> ttlRemainingFuture = tryLockInnerAsync(
+                                            waitTime=-1,
+                                            commandExecutor.getConnectionManager().getCfg().getLockWatchdogTimeout()=30秒,
+                                            TimeUnit.MILLISECONDS,
+                                            threadId=666,
+                                            RedisCommands.EVAL_LONG);
+    // 设置回调方法，异步线程与Redis交互得到结果后会回调BiConsumer#accept()
+    ttlRemainingFuture.onComplete((ttlRemaining, e) -> {
+        // 发生异常时直接return
+        if (e != null) {
+            return;
+        }
+        // 说明加锁成功
+        if (ttlRemaining == null) {
+            // 启动额外的线程，按照一定规则给当前锁续期
+            scheduleExpirationRenewal(threadId);
+        }
+    });
+    // 返回RFuture，里面有ttlRemaining
+    return ttlRemainingFuture;
+}
+// 执行lua脚本尝试上锁
+<T> RFuture<T> tryLockInnerAsync(long waitTime=-1, long leaseTime=30*1000, TimeUnit unit=毫秒, long threadId=666, RedisStrictCommand<T> command) {
+    internalLockLeaseTime = unit.toMillis(leaseTime);
+    /**
+     * 大家去看一下evalWriteAsync()的参数列表，看看每个参数都代表什么，就能理解KEYS[]和ARGV[]以及整个脚本什么意思了
+     * 如果你仔细看lua脚本，就会明白：加锁成功时返回ttlRemaining=null，加锁失败时返回ttlRemaining=xxx（上一个锁还剩多少时间）
+     *
+     * 另外，我们自定义的Redis分布式锁采用了IdUtil生成节点id，和getLockName(threadId)本质是一样的
+     */
+    return evalWriteAsync(getName(), LongCodec.INSTANCE, command,
+            "if (redis.call('exists', KEYS[1]) == 0) then " +
+                    "redis.call('hincrby', KEYS[1], ARGV[2], 1); " +
+                    "redis.call('pexpire', KEYS[1], ARGV[1]); " +
+                    "return nil; " +
+                    "end; " +
+                    "if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then " +
+                    "redis.call('hincrby', KEYS[1], ARGV[2], 1); " +
+                    "redis.call('pexpire', KEYS[1], ARGV[1]); " +
+                    "return nil; " +
+                    "end; " +
+                    "return redis.call('pttl', KEYS[1]);",
+            Collections.singletonList(getName()), internalLockLeaseTime, getLockName(threadId));
+}
+// 向Redis服务器发送脚本并返回RFuture，大家可以近似看成：往线程池提交一个任务，然后将异步结果封装到CompletableFuture
+protected <T> RFuture<T> evalWriteAsync(String key, Codec codec, RedisCommand<T> evalCommandType, String script, List<Object> keys, Object... params) {
+    CommandBatchService executorService = createCommandBatchService();
+    RFuture<T> result = executorService.evalWriteAsync(key, codec, evalCommandType, script, keys, params);
+    if (!(commandExecutor instanceof CommandBatchService)) {
+        executorService.executeAsync();
+    }
+    return result;
+}
+示意图：
+整个流程比较简单，只有两个难点：
+• lua脚本写了啥
+• ttlRemainingFuture.onComplete()有什么作用
+lua脚本解读
+大家可以通过evalWriteAsync()的参数列表推导出KEYS、ARGV分别是什么：
+KEYS[] => Collections.singletonList(getName())
+ARGV[] => internalLockLeaseTime, getLockName(threadId)
+-- 如果不存在锁："bravo1988_distributed_lock"
+if (redis.call('exists', KEYS[1]) == 0) then
+    -- 使用hincrby设置锁：hincrby bravo1988_distributed_lock a1b2c3d4:666 1
+    redis.call('hincrby', KEYS[1], ARGV[2], 1);
+    -- 设置过期时间。ARGV[1]==internalLockLeaseTime
+    redis.call('pexpire', KEYS[1], ARGV[1]);
+    -- 返回null
+    return nil;
+    end;
+-- 如果当前节点已经设置"bravo1988_distributed_lock"（注意，传了ARGV[2]==节点id）
+if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then
+    -- 就COUNT++，可重入锁
+    redis.call('hincrby', KEYS[1], ARGV[2], 1);
+    -- 设置过期时间。ARGV[1]==internalLockLeaseTime
+    redis.call('pexpire', KEYS[1], ARGV[1]);
+    -- 返回null
+    return nil;
+    end;
+-- 已经存在锁，且不是当前节点设置的，就返回锁的过期时间ttl
+return redis.call('pttl', KEYS[1]);
+总的来说，Redisson设计的分布式锁是采用hash结构：
+LOCK_NAME（锁的KEY）+ CLIENT_ID（节点ID）+  COUNT（重入次数）
+回调函数的作用
+之前我们已经学过CompletableFuture的回调机制：
+RFuture#onComplete()和它很相似：
+ttlRemainingFuture.onComplete((ttlRemaining, e) -> {
+        // 发生异常时直接return
+        if (e != null) {
+            return;
+        }
+        // 说明加锁成功
+        if (ttlRemaining == null) {
+            // 启动额外的线程，按照一定规则给当前锁续期
+            scheduleExpirationRenewal(threadId);
+        }
+    });
+onComplete()应该也是把回调函数推到stack中，方便后面异步线程弹栈执行。
+至此，我们已经解决了之前的两个问题：
+• lua脚本是什么意思（见注释）
+• ttlRemainingFuture.onComplete()有什么作用（设置回调函数，等会儿会有线程调用）
+虽然在CompletableFuture中已经强调过，这里还是要提一下：被回调的不是onComplete(BiConsumer)，而是BiConsumer#accept()。主线程在调用onComplete(BiConsumer)时把它作为参数传入，然后被推入栈中：
+BiConsumer consumer = (ttlRemaining, e) -> {
+    // 发生异常时直接return
+    if (e != null) {
+        return;
+    }
+    // 说明加锁成功
+    if (ttlRemaining == null) {
+        // 启动额外的线程，按照一定规则给当前锁续期
+        scheduleExpirationRenewal(threadId);
+    }
+}
+Redisson异步回调机制
+现在已经确定了尝试加锁后会返回RFuture，并且我们可以通过RFuture做两件事：
+• 通过RFuture获取ttlRemaining，也就是上一个锁的过期时间，如果为null则本次加锁成功，否则加锁失败，需要等待
+• 通过RFuture设置回调函数
+现在疑问是：
+• 异步线程是谁，哪来的？
+• onComplete()设置的回调函数是干嘛的？
+• 回调时的参数(ttlRemaining, e)哪来的？
+1、3两个问题非常难，源码比较绕，这里就带大家感性地体验一下，有兴趣可以自己跟源码了解。清除刚才的全部断点，只留下：
+再次DEBUG，线程会先到达return ttlRemainingFuture，随后回调BiConsumer#accept()：
+回调时线程变了：
+大家有兴趣可以自己顺着调用栈逆推回去，还是比较复杂的，涉及到NIO、Promise等，源头还是在线程池，但其中又设计了Listeners的收集和循环唤醒：
+protected <T> RFuture<T> evalWriteAsync(String key, Codec codec, RedisCommand<T> evalCommandType, String script, List<Object> keys, Object... params) {
+    CommandBatchService executorService = createCommandBatchService();
+    RFuture<T> result = executorService.evalWriteAsync(key, codec, evalCommandType, script, keys, params);
+    if (!(commandExecutor instanceof CommandBatchService)) {
+        executorService.executeAsync();
+    }
+    return result;
+}
+总之，目前为止我们只需要知道：
+我们虽然不知道onComplete()具体如何实现回调（比CompletableFuture复杂得多），但是我们知道锁续期和RFuture的回调机制相关！
+Redisson如何实现锁续期
+最终会进入：
+private void renewExpiration() {
+    ExpirationEntry ee = EXPIRATION_RENEWAL_MAP.get(getEntryName());
+    if (ee == null) {
+        return;
+    }
+
+    /**
+    * 启动一个定时器：Timeout newTimeout(TimerTask task, long delay, TimeUnit unit);
+    * 执行规则是：延迟internalLockLeaseTime/3后执行
+    * 注意啊，每一个定时任务只执行一遍，而且是延迟执行。
+    *
+    * 那么问题就来了：
+    * 1.internalLockLeaseTime/3是多久呢？
+    * 2.如果定时任务只执行一遍，似乎解决不了问题啊，本质上和我们手动设置过期时间一样：多久合适呢？
+    */
+    Timeout task = commandExecutor.getConnectionManager().newTimeout(new TimerTask() {
+        @Override
+        public void run(Timeout timeout) throws Exception {
+            ExpirationEntry ent = EXPIRATION_RENEWAL_MAP.get(getEntryName());
+            if (ent == null) {
+                return;
+            }
+            Long threadId = ent.getFirstThreadId();
+            if (threadId == null) {
+                return;
+            }
+
+            // 定时任务的目的是：重新执行一遍lua脚本，完成锁续期，把锁的ttl拨回到30s
+            RFuture<Boolean> future = renewExpirationAsync(threadId);
+            // 设置了一个回调
+            future.onComplete((res, e) -> {
+                if (e != null) {
+                    log.error("Can't update lock " + getName() + " expiration", e);
+                    // 如果宕机了，就不会续期了
+                    return;
+                }
+                // 如果锁还存在（没有unLock，说明业务还没结束），递归调用当前方法，不断续期
+                if (res) {
+                    // reschedule itself
+                    renewExpiration();
+                }
+            });
+        }
+    }, internalLockLeaseTime / 3, TimeUnit.MILLISECONDS);
+
+    ee.setTimeout(task);
+}
+/**
+* 重新执行evalWriteAsync()，和加锁时的lua脚本比较类似，但有点不同
+* 这里设置expire的参数也是internalLockLeaseTime
+*
+* 看来我们不得不去调查一下internalLockLeaseTime了！
+*/
+protected RFuture<Boolean> renewExpirationAsync(long threadId) {
+    return evalWriteAsync(getName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
+            "if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then " +
+                    "redis.call('pexpire', KEYS[1], ARGV[1]); " +
+                    "return 1; " +
+                    "end; " +
+                    "return 0;",
+            Collections.singletonList(getName()),
+            internalLockLeaseTime, getLockName(threadId));
+}
+如果你给renewExpirationAsync()打上断点，会发现每隔10秒，定时任务就会执行一遍：
+联想到定时任务的delay是internalLockLeaseTime/3，所以推测internalLockLeaseTime为30秒。
+点击internalLockLeaseTime，很容易跳转到对应的字段：
+再顺着getLockWatchdogTimeout()跳转，很快就会发现
+确实是30秒。
+梳理一下所谓的Watchdog锁续期机制：
+• lock()第一次成功加锁时，设置的锁过期时间默认30秒，这个值来自Watchdog变量
+// 重点
+private <T> RFuture<Long> tryAcquireAsync(long waitTime=-1, long leaseTime=-1, TimeUnit unit=null, long threadId=666) {
+    // lock()默认leaseTime=-1，所以会跳过if
+    if (leaseTime != -1) {
+        return tryLockInnerAsync(waitTime, leaseTime, unit, threadId, RedisCommands.EVAL_LONG);
+    }
+    // 执行lua脚本加锁，返回RFuture。第二个参数就是leaseTime，来自LockWatchdogTimeout！！！
+    RFuture<Long> ttlRemainingFuture = tryLockInnerAsync(
+                                            waitTime=-1,
+                                            commandExecutor.getConnectionManager().getCfg().getLockWatchdogTimeout()=30秒,
+                                            TimeUnit.MILLISECONDS,
+                                            threadId=666,
+                                            RedisCommands.EVAL_LONG);
+    // 设置回调方法
+    ttlRemainingFuture.onComplete((ttlRemaining, e) -> {
+        // 发生异常时直接return
+        if (e != null) {
+            return;
+        }
+        // 说明加锁成功
+        if (ttlRemaining == null) {
+            // 启动额外的线程，按照一定规则给当前锁续期
+            scheduleExpirationRenewal(threadId);
+        }
+    });
+    // 返回RFuture，里面有ttlRemaining
+    return ttlRemainingFuture;
+}
+// 执行lua脚本上锁
+<T> RFuture<T> tryLockInnerAsync(long waitTime=-1, long leaseTime=30*1000, TimeUnit unit=毫秒, long threadId=666, RedisStrictCommand<T> command) {
+    // 略...
+}
+• onComplete()设置回调，等Redis调用回来后，异步线程回调BiConsumer#accept()，进入scheduleExpirationRenewal(threadId)，开始每隔internalLockLeaseTime/3时间就给锁续期
+和加锁一样，执行lua脚本其实很快，所以这里的future.onComplete()虽说是异步，但很快就会被调用，然后就会递归调用renewExpiration()，然后又是一个TimerTask()，隔internalLockLeaseTime/3后又给锁续期。
+也就是说，Redisson的Watchdog定时任务虽然只延迟执行一次，但每次调用都会递归，所以相当于：重复延迟执行。
+还记得之前学习CompletableFuture时我写的一行注释吗：
+也就是说，只要主线程的任务不结束，就会一直给锁续期。
+锁释放有两种情况：
+• 任务结束，主动unLock()删除锁
+redisson.lock();
+task();
+redisson.unLock();
+• 任务结束，不调用unLock()，但由于守护线程已经结束，不会有后台线程继续给锁续期，过了30秒自动过期
+上面我们探讨的都是加锁成功的流程，直接ttl=null就返回了，后面一大坨都是加锁失败时的判断逻辑，其中涉及到：
+• while(true)死循环
+• 阻塞等待
+• 释放锁时Redis的Publish通知（在后面的unLock流程会看到）
+• 其他节点收到锁释放的信号后重新争抢锁
+整个过程还是非常复杂的，大家有精力可以自行百度了解，后面介绍unLock()时也会涉及一部分加锁失败相关内容。
+unLock()源码解析
+有了lock()的经验，unLock()就简单多了：
+相信大家还是能推断出KEYS[]和ARGV[]，这里就直接给出答案了：
+-- 参数解释：
+-- KEYS[1] => "bravo1988_distributed_lock"
+-- KEYS[2] => getChannelName()
+-- ARGV[1] => LockPubSub.UNLOCK_MESSAGE
+-- ARGV[2] => internalLockLeaseTime
+-- ARGV[3] => getLockName(threadId)
+-- 锁已经不存在，返回null
+if (redis.call('hexists', KEYS[1], ARGV[3]) == 0) then
+    return nil;
+    end;
+-- 锁还存在，执行COUNT--（重入锁的反向操作）
+local counter = redis.call('hincrby', KEYS[1], ARGV[3], -1);
+-- COUNT--后仍然大于0（之前可能重入了多次）
+if (counter > 0) then
+    -- 设置过期时间
+    redis.call('pexpire', KEYS[1], ARGV[2]);
+    return 0;
+-- COUNT--后小于等于0，删除锁，并向对应的Channel发送消息（NIO），消息类型是LockPubSub.UNLOCK_MESSAGE（锁释放啦，快来抢~）
+else
+    redis.call('del', KEYS[1]);
+    redis.call('publish', KEYS[2], ARGV[1]);
+    return 1;
+    end;
+
+return nil;
+也就是说，当一个锁被释放时，原先持有锁的节点会通过NIO的Channel发送LockPubSub.UNLOCK_MESSAGE，告诉其他订阅的Client：我已经释放锁啦，快来抢啊！此时原本阻塞的其他节点就会重新竞争锁。
+而所谓重入和反重入，简单来说就是：
+// 加锁三次
+redisson.lock();
+redisson.lock();
+redisson.lock();
+// 执行业务
+executeTask();
+// 相应的，就要解锁三次
+redisson.unLock();
+redisson.unLock();
+redisson.unLock();
+实际开发不会这样调用，但有时会出现子父类方法调用或者同一个线程反复调用使用同一把锁的多个方法，就会发生锁的重入（COUNT++），而当这些方法执行完毕逐个弹栈的过程中就会逐个unLock()解锁（COUNT--）。
+lock(leaseTime, unit)：自定义过期时间、且不续期
+lock()默认会开启定时任务对锁进行续期，但Redisson还提供了另一个lock方法：
+两个lock()唯一的区别是，内部调用lock()时，一个传了leaseTime=-1，另一个传了我们自己的leaseTime。对于外部调用者来说：
+redisson.lock();
+redisson.lock(-1, null);
+这两种写法其实一样。
+当然了，通常会传入有意义的leaseTime：
+这种写法除了更改了锁的默认ttl时间外，还阉割了锁续期功能。也就是说，10秒后如果任务还没执行完，就会和我们手写的Redis分布式锁一样，自动释放锁。
+为什么锁续期的功能失效了呢？留给大家自己解答，这里只给出参考答案：
+// 重点
+private <T> RFuture<Long> tryAcquireAsync(long waitTime=-1, long leaseTime=-1, TimeUnit unit=null, long threadId=666) {
+    // lock()默认leaseTime=-1，会跳过这个if执行后面的代码。但如果是lock(10, TimeUnit.SECONDS)，会执行if并跳过后面的代码。
+    if (leaseTime != -1) {
+        // 其实和下面的tryLockInnerAsync()除了时间不一样外，没什么差别
+        return tryLockInnerAsync(waitTime, leaseTime, unit, threadId, RedisCommands.EVAL_LONG);
+    }
+    // 但由于上面直接return了，所以下面的都不会执行！！
+    /*
+    RFuture<Long> ttlRemainingFuture = tryLockInnerAsync(
+                                            waitTime=-1,
+                                            commandExecutor.getConnectionManager().getCfg().getLockWatchdogTimeout()=30秒,
+                                            TimeUnit.MILLISECONDS,
+                                            threadId=666,
+                                            RedisCommands.EVAL_LONG);
+    // 设置回调方法（不会执行！！）
+    ttlRemainingFuture.onComplete((ttlRemaining, e) -> {
+        // 发生异常时直接return
+        if (e != null) {
+            return;
+        }
+        // 说明加锁成功
+        if (ttlRemaining == null) {
+            // 启动额外的线程，按照一定规则给当前锁续期
+            scheduleExpirationRenewal(threadId);
+        }
+    });
+    // 不会执行！！
+    return ttlRemainingFuture;
+    */
+}
+// 执行lua脚本加锁
+<T> RFuture<T> tryLockInnerAsync(long waitTime=-1, long leaseTime=30*1000, TimeUnit unit=毫秒, long threadId=666, RedisStrictCommand<T> command) {
+    // 略...
+}
+也就是说，直接执行lua加锁就返回了，没有机会启动定时任务和递归...
+tryLock()系列：让调用者自行决定加锁失败后的操作
+之前我们已经观察到，如果多个节点都调用lock()，那么没获取到锁的节点线程会阻塞，直到原先持有锁的节点删除锁并publish LockPubSub.UNLOCK_MESSAGE 。
+但如果调用者不希望阻塞呢？他有可能想着：如果加锁失败，我就直接放弃。
+是啊，毕竟尝试加锁的目的可能完全相反：
+• 在保证线程安全的前提下，尽量让所有线程都执行成功
+• 在保证线程安全的前提下，只让一个线程执行成功
+前者适用于秒杀、下单等操作，希望尽最大努力达成；后者适用于定时任务，只要让一个节点去执行，没有获取锁的节点应该fast-fail（快速失败）。
+也就是说，节点获锁失败后，理论上可以有各种各样的处理方式：
+• 阻塞等待
+• 直接放弃
+• 试N次再放弃
+• ...
+但lock、lock(leaseTime, timeUnit)替我们写死了：阻塞等待。即使lock(leaseTime, unit)，其实也是阻塞等待，只不过不会像lock()一样不断续期。
+究其原因，主要是lock()这些方法对于加锁失败的判断是在内部写死的：
+而tryLock()方法则去掉了这层中间判断，把结果直接呈递到调用者面前，让调用者自己决定加锁失败后如何处理：
+tryLock()直接返回true（加锁成功）和false（加锁失败），后续如何处理，全凭各个节点自己做出决定。
+@Test
+public void testTryLock() {
+    RLock lock = redissonClient.getLock("bravo1988_distributed_lock");
+    boolean b = lock.tryLock();
+    if (b) {
+        // 业务操作...
+    }
+
+    // 调用立即结束，不阻塞
+}
+这样讲可能有点抽象，大家可以分别点进lock()和tryLock()，自行体会。总之，tryLock()中间少了一大块逻辑，因为它不插手结果的判断。
+另外，tryLock()在加锁成功的情况下，其实和lock()是一样的，也会触发锁续期：
+如果你不希望触发锁续期，可以像lock(leaseTime, unit)一样指定过期时间，还可以指定加锁失败后等待多久：
+@Test
+public void testLockSuccess() throws InterruptedException {
+    RLock lock = redissonClient.getLock("bravo1988_distributed_lock");
+    // 基本等同于lock()，加锁成功也【会自动锁续期】，但获锁失败【立即返回false】，交给调用者判断是否阻塞或放弃
+    lock.tryLock();
+    // 加锁成功仍然【会自动锁续期】，但获锁失败【会等待10秒】，看看这10秒内当前锁是否释放，如果是否则尝试加锁
+    lock.tryLock(10, TimeUnit.SECONDS);
+    // 加锁成功【不会锁续期】，加锁失败【会等待10秒】，看看这10秒内当前锁是否释放，如果是否则尝试加锁
+    lock.tryLock(10, 30, TimeUnit.SECONDS);
+}
+注意哈，只传两个参数时，那个time其实是传给waitTime的：
+我们之前操作的都是leaseTime，此时还是-1，也就是说如果加锁成功，还是会锁续期。
+那waitTime是用来控制什么的呢？
+简而言之：
+• tryLock()加锁失败会立即返回false，而加了waitTime可以手动指定阻塞等待的时间（等一等，万一行呢）
+• leaseTime的作用没变，控制的是加锁成功后要不要续期
+至此，分布式锁章节暂时告一段段落。大家有兴趣的话，可以把上一篇花里胡哨的定时任务用Redisson改写，去掉Redis Message Queue（但定时任务最好还是用xxl-job等）。
+Redisson的具体使用方法可以参考尚硅谷雷丰阳老师的讲解：
+https://www.bilibili.com/video/BV18a4y1L7nv?p=57
+Redisson分布式锁的缺陷
+在哨兵模式或者主从模式下，如果master实例宕机，可能导致多个节点同时完成加锁。
+以主从模式为例，由于所有的写操作都是先在master上进行，然后再同步给各个slave节点，所以master与各个slave节点之间的数据具有一定的延迟性。对于Redisson分布式锁而言，比如客户端刚对master写入Redisson锁，然后master异步复制给各个slave节点，但这个过程中master节点宕机了，其中一个slave节点经过选举变成了master节点，好巧不巧，这个slave还没同步到Reddison锁，所以其他客户端可能再次加锁。
+具体情况，大家可以百度看看，解决方案也比较多。
+还是那句话，但凡涉及到分布式，都没那么简单。有时引入一个解决方案后，我们不得不面对另一个问题。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
