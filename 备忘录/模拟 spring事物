@@ -1,0 +1,237 @@
+公司的Team Leader有一句话：常用的、有用的好好学，不常用的、性价比低的，先放一放。先广度，后深度，绝大部分时候广度比深度更重要。
+之前介绍了Spring事务传播机制，说实在的，平时用到的概率无限趋近于零。我也挺纠结，不写吧怕被大家指摘，写了吧又确实毫无卵用（我自己都已经忘光了）。
+这一篇我们来学习Spring事务，这个很有用。我不是说Spring事务有用，而是实现事务的思路很有用。
+你可能会问：难道Spring的事务没用吗？是也不是，反正自从我来到现在这家公司，再也没写过@Transactional注解，平时代码里也禁止使用Spring事务
+为啥？
+首先，由于是电商系统，必然是分布式的，Spring事务那一套肯定行不通了，要保证一致性，必须用分布式事务。其次，使用事务必然会降低性能，这在电商系统里得不偿失。所以，电商系统往往只会给核心系统加事务，而这些核心系统又被抽取做成中台。中台一般是稳定的，业务系统依赖于中台，而我在业务组，平时做的都是场景展示、大促啥的，并不存在需要严格保证事务的场景。
+你可能有疑问，当一个方法里有多个增删改操作时，不使用事务如何保证业务一致性呢？
+首先，程序没有我们想的那么脆弱，绝大部分时候并不会崩，即使崩了，错乱的数据也不会很多，因为崩的一瞬间接口就变为不可访问的状态，阻止了“继续错乱”的趋势。其次，我们可以在代码里做反向补偿：
+public void method() {
+    try{
+        // 插入user=1
+    } catch(Exception e){
+        log.error("...")
+        // 删除user=1
+    }
+}
+最后，如果反向补偿也失败，那就根据流水记录人为修复数据吧（修复虽麻烦，但其实也不常发生）。
+好了，扯远了，让我们回到Spring事务上来。真正的Spring事务是通过动态代理和责任链实现的，但这里我并不打算写得很复杂，而是只展示最核心的部分，以后大家有机会自己去看源码时，也算有个参照。
+本案例会用到动态代理和注解，对这两块不熟悉的同学可以先去找小册的对应章节复习。
+效果演示
+tx.mp4
+代码
+<dependencies>
+    <dependency>
+        <groupId>junit</groupId>
+        <artifactId>junit</artifactId>
+        <version>4.12</version>
+    </dependency>
+    <dependency>
+        <groupId>org.projectlombok</groupId>
+        <artifactId>lombok</artifactId>
+        <version>1.18.16</version>
+    </dependency>
+    <dependency>
+        <groupId>commons-dbcp</groupId>
+        <artifactId>commons-dbcp</artifactId>
+        <version>1.4</version>
+    </dependency>
+    <dependency>
+        <groupId>com.google.guava</groupId>
+        <artifactId>guava</artifactId>
+        <version>18.0</version>
+    </dependency>
+    <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-lang3</artifactId>
+    </dependency>
+</dependencies>
+自定义MyTransactional注解
+@Target({ElementType.TYPE, ElementType.METHOD})
+@Retention(RetentionPolicy.RUNTIME)
+public @interface MyTransactional {
+}
+模拟Spring容器
+/**
+ * Bean容器
+ */
+public class ApplicationContext {
+    public Object getBean(String name) throws Exception {
+        // 根据全类名，得到目标类的Class对象
+        Class<?> clazz = Class.forName(name);
+        // 根据Class反射创建目标对象
+        Object target = clazz.newInstance();
+        // 判断类上是否标注了事务注解@MyTransactional
+        MyTransactional myTransactional = clazz.getAnnotation(MyTransactional.class);
+        // 如果打了@MyTransactional注解，返回代理对象，否则返回目标对象
+        if (myTransactional != null) {
+            // 得到通知对象
+            TransactionManager txManager = new TransactionManager();
+//            txManager.setConnectionUtils(new ConnectionUtils());
+            // 组装完毕，返回代理对象
+            return BeanFactory.getProxy(target, txManager);
+        }
+        // 返回目标对象
+        return target;
+    }
+}
+代理工厂
+/**
+ * 事务代理工厂
+ */
+public class BeanFactory {
+    // 传入目标对象target，为它装配好通知，返回代理对象
+    public static Object getProxy(Object target, TransactionManager txManager) {
+        return Proxy.newProxyInstance(
+                target.getClass().getClassLoader(),/*1.类加载器*/
+                target.getClass().getInterfaces(), /*2.目标对象实现的接口*/
+                (proxy1, method, args) -> {        /*3.InvocationHandler*/
+                    try {
+                        //1.开启事务
+                        txManager.beginTransaction();
+                        //2.执行操作
+                        Object retVal = method.invoke(target, args);
+                        //3.提交事务
+                        txManager.commit();
+                        //4.返回结果
+                        return retVal;
+                    } catch (Exception e) {
+                        //5.回滚事务
+                        txManager.rollback();
+                        throw new RuntimeException(e);
+                    } finally {
+                        //6.释放连接
+                        txManager.release();
+                    }
+                }
+        );
+    }
+}
+事务管理器
+/**
+ * 和事务管理相关的工具类，它包含了，开启事务，提交事务，回滚事务和释放连接
+ */
+public class TransactionManager {
+//    private ConnectionUtils connectionUtils;
+//    public void setConnectionUtils(ConnectionUtils connectionUtils) {
+//        this.connectionUtils = connectionUtils;
+//    }
+    /**
+     * 开启事务
+     */
+    public void beginTransaction() {
+        try {
+//            connectionUtils.getThreadConnection().setAutoCommit(false);
+            System.out.println("开始事务");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    /**
+     * 提交事务
+     */
+    public void commit() {
+        try {
+//            connectionUtils.getThreadConnection().commit();
+            System.out.println("提交事务");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    /**
+     * 回滚事务
+     */
+    public void rollback() {
+        try {
+//            connectionUtils.getThreadConnection().rollback();
+            System.out.println("回滚事务");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    /**
+     * 释放连接
+     */
+    public void release() {
+        try {
+//            connectionUtils.getThreadConnection().close();//还回连接池中
+//            connectionUtils.removeConnection();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+数据库连接池工具
+/**
+ * 连接的工具类，它用于从数据源中获取一个连接，并且实现和线程的绑定
+ */
+public class ConnectionUtils {
+    private ThreadLocal<Connection> tl = new ThreadLocal<>();
+    private static BasicDataSource dataSource = new BasicDataSource();
+    // 静态代码块,设置连接数据库的参数
+    static {
+        dataSource.setDriverClassName("com.mysql.jdbc.Driver");
+        dataSource.setUrl("jdbc:mysql://localhost:3306/demo");
+        dataSource.setUsername("root");
+        dataSource.setPassword("123456");
+    }
+    /**
+     * 获取当前线程上的连接
+     *
+     * @return
+     */
+    public Connection getThreadConnection() {
+        try {
+            //1.先从ThreadLocal上获取
+            Connection conn = tl.get();
+            //2.判断当前线程上是否有连接
+            if (conn == null) {
+                //3.从数据源中获取一个连接，并且存入ThreadLocal中
+                conn = dataSource.getConnection();
+                tl.set(conn);
+            }
+            //4.返回当前线程上的连接
+            return conn;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+    /**
+     * 把连接和线程解绑
+     */
+    public void removeConnection() {
+        tl.remove();
+    }
+}
+测试
+public interface UserService {
+    /**
+     * 升级VIP
+     *
+     * @param name
+     */
+    void upgradeVip(String name);
+}
+@MyTransactional
+public class UserServiceImpl implements UserService {
+    @Override
+    public void upgradeVip(String name) {
+        System.out.println("update t_user SET userType=10 WHERE name=" + name);
+        throwException();
+        System.out.println("update t_growth SET growth=1000 WHERE name=" + name);
+    }
+    private void throwException() {
+        System.out.println("哎呀，抛异常了...");
+        throw new RuntimeException("DataBase Exception");
+    }
+}
+/**
+ * 注意，这个程序没用到Spring，都是我们自己写的代码
+ */
+public class TechShareApplication {
+    public static void main(String[] args) throws Exception {
+        ApplicationContext applicationContext = new ApplicationContext();
+        UserService userService = (UserService) applicationContext.getBean("com.bravo.service.UserServiceImpl");
+        userService.upgradeVip("bravo1988");
+    }
+}

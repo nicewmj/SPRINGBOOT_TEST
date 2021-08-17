@@ -15,6 +15,9 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpSession;
 
+/**
+ * 简单的权限测试controller
+ */
 @RestController
 @RequestMapping("/user")
 public class UserLoginController {

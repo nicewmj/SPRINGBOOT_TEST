@@ -1,0 +1,255 @@
+之前我们一起学习了此处为语雀文档，点击链接查看：https://www.yuque.com/bravo1988/java/yrtlp0，已经忘了的同学可以先去回顾一下。
+当时我在文章里留了一个问题：
+现在，终于到了填坑的时候了！为了把这个问题讲清楚，我打算模拟一个山寨版的Spring事件监听机制。其实，2019年那会儿我在知乎已经写过一版：
+https://zhuanlan.zhihu.com/p/101141124
+然而，重新回顾却发现：当时太年轻了，刚学完Spring源码，巴不得秀一波骚操作，所以写得很复杂，可读性较差（你看看网上很多文章，都犯了我以前的毛病）。既然这篇文章是为了让大家明白底层原理，那么“让大家懂”比什么都重要。
+所以这次重写山寨版Spring事件监听机制，我去除了很多非核心类，把所有逻辑都压缩到ApplicationContext中，希望能带来更好的阅读体验。
+事件监听机制？还是观察者模式？
+很多人总是执着于外在的表象，并在“它究竟是什么”这个问题上争论不休，却很少去了解它能做什么。在对待设计模式这个问题上，很多人执着于“它究竟是哪种模式”，却不去理会“这种模式能解决什么问题”。就像Spring的事件监听机制，它其实是什么模式都不重要，重要的是了解它可以解决什么问题。
+说起来也是GOF害的，当年编写了一本《Design Patterns: Elements of Reusable Object-Oriented Software》（中文译名《设计模式》），举例了常见的23种设计模式，结果内容实在抽象，很多人看完云里雾里，只记得了“23”这个数字，然后以为天底下只有23种设计模式，每每见到一种模式，就想着往上面套...发现那里有点不一致，就浑身难受，到处问人：哎呀，这个到底是啥模式呀...
+去他的，一点都不重要！设计模式最重要的就是设计原则，而不是具体的模式，理解了设计原则才能写出好的设计模式。无招胜有招，才是一种境界。
+效果展示
+事件监听.mp4
+设计思路
+代码
+简单的maven项目即可
+<build>
+  <plugins>
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-compiler-plugin</artifactId>
+      <configuration>
+        <source>8</source>
+        <target>8</target>
+      </configuration>
+    </plugin>
+  </plugins>
+</build>
+<dependencies>
+  <dependency>
+    <groupId>junit</groupId>
+    <artifactId>junit</artifactId>
+    <version>4.12</version>
+  </dependency>
+  <dependency>
+    <groupId>org.projectlombok</groupId>
+    <artifactId>lombok</artifactId>
+    <version>1.18.16</version>
+  </dependency>
+</dependencies>
+自定义事件
+/**
+ * 退单事件
+ */
+public class OrderCanceledEvent extends Event {
+    public OrderCanceledEvent(Object source) {
+        super(source);
+    }
+}
+/**
+ * 下单事件
+ */
+public class OrderCompletedEvent extends Event {
+    public OrderCompletedEvent(Long source) {
+        super(source);
+    }
+}
+业务代码
+/**
+ * 短信服务，监听下单事件，下单后发短信通知用户
+ */
+public class SmsService implements Listener<OrderCompletedEvent> {
+    @SneakyThrows
+    @Override
+    public void onApplicationEvent(OrderCompletedEvent event) {
+        System.out.println("下单成功！您的订单号是: " + event.getSource());
+        TimeUnit.SECONDS.sleep(2);
+    }
+    @Override
+    public boolean supportsEventType(Event event) {
+        return event instanceof OrderCompletedEvent;
+    }
+}
+/**
+ * 物流服务，监听下单事件，用户下单后发货
+ */
+public class CarService implements Listener<OrderCompletedEvent> {
+    @SneakyThrows
+    @Override
+    public void onApplicationEvent(OrderCompletedEvent event) {
+        System.out.println("订单" + event.getSource() + "已经发货！");
+        TimeUnit.SECONDS.sleep(2);
+    }
+    @Override
+    public boolean supportsEventType(Event event) {
+        return event instanceof OrderCompletedEvent;
+    }
+}
+/**
+ * 退款服务，监听取消订单事件，为用户退款
+ */
+public class RefundService implements Listener<OrderCanceledEvent> {
+    @SneakyThrows
+    @Override
+    public void onApplicationEvent(OrderCanceledEvent event) {
+        System.out.println("退款成功！" + event.getSource() + "元已经退回原账户");
+        TimeUnit.SECONDS.sleep(2);
+    }
+    @Override
+    public boolean supportsEventType(Event event) {
+        return event instanceof OrderCanceledEvent;
+    }
+}
+核心实现
+ApplicationContext
+public class ApplicationContext {
+    private final Set<Listener<?>> listeners = new LinkedHashSet<>();
+    /**
+     * 注册bean（监听器）
+     *
+     * @param listener
+     */
+    public void registerListener(Listener<?> listener) {
+        listeners.add(listener);
+    }
+    /**
+     * 发布事件
+     *
+     * @param event
+     */
+    public void publish(Event event) {
+        Set<Listener<?>> matchedListeners = getMatchedListeners(event);
+        matchedListeners.forEach(listener -> this.invokeListener(listener, event));
+    }
+    // ------------- private methods -------------
+    private Set<Listener<?>> getMatchedListeners(Event event) {
+        if (listeners.isEmpty()) {
+            return Collections.emptySet();
+        }
+        return listeners.stream()
+                .filter(listener -> listener.supportsEventType(event))
+                .collect(Collectors.toSet());
+    }
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private void invokeListener(Listener listener, Event event) {
+        listener.onApplicationEvent(event);
+    }
+}
+event
+/**
+ * 事件
+ */
+@Getter
+public class Event {
+    private Object source;
+    public Event(Object source) {
+        this.source = source;
+    }
+}
+Listener
+/**
+ * 监听器
+ *
+ * @param <E>
+ */
+public interface Listener<E extends Event> {
+    /**
+     * 事件发生时触发
+     *
+     * @param event
+     */
+    void onApplicationEvent(E event);
+    /**
+     * 监听器是否匹配
+     *
+     * @param event
+     * @return
+     */
+    boolean supportsEventType(Event event);
+}
+测试
+public class EventTest {
+    private ApplicationContext applicationContext = new ApplicationContext();
+    // 模拟Spring启动，初始化容器并注册bean
+    @Before
+    public void refreshApplication() {
+        applicationContext.registerListener(new SmsService());
+        applicationContext.registerListener(new CarService());
+        applicationContext.registerListener(new RefundService());
+    }
+    // 模拟下单
+    @Test
+    public void orderCompletedService() {
+        // 扣减库存...
+        // 生成订单... orderId=10086
+        // 订单流水...
+        // 下单成功，发布事件
+        applicationContext.publish(new OrderCompletedEvent(10086L));
+    }
+    // 模拟取消订单
+    @Test
+    public void orderCanceledService() {
+        // 回退库存...
+        // 更改订单状态... orderId=10086
+        // 订单流水...
+        // 订单取消成功，发布事件
+        applicationContext.publish(new OrderCanceledEvent(10086L));
+    }
+}
+优化：支持异步事件
+之前提到过，Spring的事件监听机制模式是同步的：
+上面代码有3个角色，OrderService发布事件、SmsService监听事件（sleep 2s）、CarService监听事件（sleep 2s）
+那么，怎么才能支持异步呢？引入线程池即可：
+public class ApplicationContext {
+    private final Set<Listener<?>> listeners = new LinkedHashSet<>();
+    // 支持异步事件
+    @Nullable
+    private Executor taskExecutor;
+    /**
+     * 注册bean（监听器）
+     *
+     * @param listener
+     */
+    public void registerListener(Listener<?> listener) {
+        listeners.add(listener);
+    }
+    /**
+     * 发布事件
+     *
+     * @param event
+     */
+    public void publish(Event event) {
+        Set<Listener<?>> matchedListeners = getMatchedListeners(event);
+        for (Listener<?> listener : matchedListeners) {
+            Executor executor = getTaskExecutor();
+            if (executor != null) {
+                // 如果外界设置了线程池，则变为异步事件
+                executor.execute(() -> invokeListener(listener, event));
+            } else {
+                // 默认同步事件
+                invokeListener(listener, event);
+            }
+        }
+    }
+    // ------------- private methods -------------
+    private Set<Listener<?>> getMatchedListeners(Event event) {
+        if (listeners.isEmpty()) {
+            return Collections.emptySet();
+        }
+        return listeners.stream()
+                .filter(listener -> listener.supportsEventType(event))
+                .collect(Collectors.toSet());
+    }
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private void invokeListener(Listener listener, Event event) {
+        listener.onApplicationEvent(event);
+    }
+    @Nullable
+    public Executor getTaskExecutor() {
+        return this.taskExecutor;
+    }
+    public void setTaskExecutor(Executor executor) {
+        this.taskExecutor = executor;
+    }
+}
+至此，本篇完。初看不以为意，但你如果再扫一眼，就会发现整个工程只引入了Lombok和Junit，几乎全部依赖都来自于JDK本身。也就是说，Spring最大的用处只不过是提供了自动装配（DI），它的事件监听机制本身和DI没太大关系，JDK足矣。

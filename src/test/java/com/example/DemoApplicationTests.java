@@ -8,6 +8,12 @@ import com.example.easyexcel.DemoDataListener;
 import com.example.entity.DemoData;
 import com.example.service.userComment.CommentService;
 import com.example.spring监听机制.demo.OrderService;
+import com.example.spring监听机制.监听机制优化_commont.core.ApplicationContext;
+import com.example.spring监听机制.监听机制优化_commont.event.OrderCanceledEvent;
+import com.example.spring监听机制.监听机制优化_commont.event.OrderCompletedEvent;
+import com.example.spring监听机制.监听机制优化_commont.service.CarService;
+import com.example.spring监听机制.监听机制优化_commont.service.RefundService;
+import com.example.spring监听机制.监听机制优化_commont.service.SmsService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
@@ -16,6 +22,7 @@ import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.*;
+import org.aspectj.lang.annotation.Before;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -67,7 +74,10 @@ class DemoApplicationTests {
         orderService.order();
     }
 
-
+    /**
+     * 测试线程
+     * @throws InterruptedException
+     */
     @Test
     public void testClosure() throws InterruptedException {
         // 在匿名内部类的外面定义一个String变量
@@ -765,4 +775,6 @@ class DemoApplicationTests {
             e.printStackTrace();
         }
     }
+
+
 }

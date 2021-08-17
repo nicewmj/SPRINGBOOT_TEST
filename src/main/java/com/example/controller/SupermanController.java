@@ -8,6 +8,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+/**
+ * 树形结构数据的嵌套封装
+ */
 @RestController
 public class SupermanController {
 
