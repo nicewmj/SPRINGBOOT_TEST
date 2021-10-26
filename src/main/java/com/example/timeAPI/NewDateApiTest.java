@@ -7,7 +7,9 @@ import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalUnit;
 import java.util.Date;
 
-
+/**
+ * LocalDateTime  使用
+ */
 public class NewDateApiTest {
     public static void main(String[] args) {
 
@@ -23,10 +25,11 @@ public class NewDateApiTest {
         LocalTime localTime = LocalTime.now();
         System.out.println("new localTime api " + localDate);
 
+        //2021-09-24T15:54:28.946
         LocalDateTime localDateTime = LocalDateTime.now();
         System.out.println("new localDateTime api  " + localDateTime);
 
-        //组合
+        //组合 2021-09-24T15:54:28.946
         LocalDateTime localDateTime1 = LocalDateTime.of(localDate, localTime);
         System.out.println("new localTime 组合api  " + localDateTime1);
 

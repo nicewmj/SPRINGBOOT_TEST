@@ -140,11 +140,17 @@ public class PoiExcelUtils<T> {
     }
 
     /**
-     * Excel导入
+     * Excel导入  使用  1: new 把实体类class放进去
+     *                  2: 调用方法
+     *          PoiExcelUtils poiExcelUtils = new PoiExcelUtils(OrderEntity.class);
+     *         List list1 = poiExcelUtils.importExcel(is, 1, 0);
      *
      * @param inputStream 要导入的Excel表
-     * @param rowIndex    从哪一行开始读取
-     * @param cellIndex   从哪一列开始读取
+     * @param rowIndex    从哪一行开始读取  第一行是 0
+     * @param cellIndex   从哪一列开始读取  第一列是 0
+     *                    实体类标注字段和 excel的数据一一对应，否则会空指针异常  就excel有五列数据那么 实体类的注解
+     *                    应该要有五个 @ExcelAttribute
+     *                    说人话 就是excel的数据和实体类字段一一对应
      * @return
      * @throws Exception
      */
@@ -166,9 +172,12 @@ public class PoiExcelUtils<T> {
                 // 当前是朱丽叶，已经就位了，罗密欧在哪？
                 Object value = getValue(cell);
                 // 根据索引快速从老公组找出罗密欧
+                // * 这里假设单元格顺序和Pojo顺序一致，所以在这个for循环中，row.getCell(j)单元格对应fields[j - cellIndex]字段
+                // * fields是从1开始的（id不设置），所以要j - cellIndex，这样单元格和Pojo字段才是匹配的。
                 Field field = fieldMap.get(j - cellIndex);
                 // 把朱丽叶配给罗密欧（把单元格数据赋值给字段）
                 field.setAccessible(true);
+                //把字段复制进实体类，excel表格的字段类型需要和实体字段类型一致，否则报错
                 field.set(pojo, convertAttrType(field, cell));
             }
 

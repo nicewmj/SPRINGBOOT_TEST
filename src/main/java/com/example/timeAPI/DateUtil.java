@@ -15,8 +15,7 @@ import static org.apache.logging.log4j.message.MapMessage.MapFormat.JSON;
  */
 public final class DateUtil {
 
-    private DateUtil() {
-    }
+    private DateUtil() {}
 
     private static final String DEFAULT_DATE_PATTERN = "yyyy-MM-dd HH:mm:ss";
 
