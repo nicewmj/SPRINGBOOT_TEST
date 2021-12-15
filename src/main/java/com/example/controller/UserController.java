@@ -19,8 +19,8 @@ public class UserController {
      * @return
      */
 
-    @CrossOrigin("http://localhost:7070")
-    @GetMapping(value = "/getUser/{id}")
+//    @CrossOrigin("http://localhost:7070")
+    @GetMapping(value = "/getUser")
     public User getUser(@PathVariable("id") Long id) {
         // id没用上，就是演示一下@PathVariable注解
         System.out.println("id:" + id);
@@ -35,6 +35,7 @@ public class UserController {
 
 
     /**
+     *
      * 新增用户
      * 前段的json请求，后端必须加上 @RequestBody
      *

@@ -19,32 +19,32 @@ spring:
     suffix: .html
     cache: false # 开发时关闭缓存,不然没法看到实时页面
 
-  rabbitmq:
-    username: doone
-    password: xdw#2020
-    addresses: 36.148.23.208
-    port: 15672
-    virtual-host: /
-    #  如果你们在配置确认回调，测试发现无法触发回调函数，那么存在原因也许是因为版本导致的配置项不起效，
-    #  消息回调的配置   可以把publisher-confirms: true 替换为 publisher-confirm-type: correlated
-    publisher-confirms: true
-    cache:
-      connection:
-        mode: channel
-    #       多个连接,多个channel
-    #       mode: connection
-
-# pagehelper 分页插件
-
-
-    # 打印SQL
-    logging:
-      level:
-        com.example.mapper: debug
-
-    mybatis:
-      # XML扫描路径
-      mapper-locations: classpath:*/mapper/*.xml
-      # 通用Mapper的方法会自动转换驼峰，但手写的SQL需要开启才能转换
-      configuration:
-        map-underscore-to-camel-case: on
+#  rabbitmq:
+#    username: doone
+#    password: xdw#2020
+#    addresses: 36.148.23.208
+#    port: 15672
+#    virtual-host: /
+#    #  如果你们在配置确认回调，测试发现无法触发回调函数，那么存在原因也许是因为版本导致的配置项不起效，
+#    #  消息回调的配置   可以把publisher-confirms: true 替换为 publisher-confirm-type: correlated
+#    publisher-confirms: true
+#    cache:
+#      connection:
+#        mode: channel
+#    #       多个连接,多个channel
+#    #       mode: connection
+#
+## pagehelper 分页插件
+#
+#
+#    # 打印SQL
+#    logging:
+#      level:
+#        com.example.mapper: debug
+#
+#    mybatis:
+#      # XML扫描路径
+#      mapper-locations: classpath:*/mapper/*.xml
+#      # 通用Mapper的方法会自动转换驼峰，但手写的SQL需要开启才能转换
+#      configuration:
+#        map-underscore-to-camel-case: on

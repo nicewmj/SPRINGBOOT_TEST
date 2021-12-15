@@ -1,3 +1,4 @@
+/*
 package com.example;
 
 
@@ -66,18 +67,22 @@ class DemoApplicationTests {
 //    @Autowired
 //    private TemplateEngine templateEngine;
 
-    /**
+    */
+/**
      * 测试spring的监听
-     */
+     *//*
+
     @Test
     public void testSpringEvent() {
         orderService.order();
     }
 
-    /**
+    */
+/**
      * 测试线程
      * @throws InterruptedException
-     */
+     *//*
+
     @Test
     public void testClosure() throws InterruptedException {
         // 在匿名内部类的外面定义一个String变量
@@ -99,11 +104,13 @@ class DemoApplicationTests {
 
     //=================================================================ce===== 测试POI 导入导出开始=================================
 
-    /**
+    */
+/**
      * 导入 第一版  Excel
      *
      * @throws IOException
-     */
+     *//*
+
     @Test
     public void testSimpleRead() throws IOException {
 
@@ -113,9 +120,11 @@ class DemoApplicationTests {
         // 获取工作表。一个工作薄中可能有多个工作表，比如sheet1 sheet2，可以根据下标，也可以根据sheet名称
         XSSFSheet sheet = workbook.getSheetAt(0);
 
-        /**
+        */
+/**
          * 方式1 增强for，Row代表行，Cell代表单元格
-         */
+         *//*
+
 
         // 遍历每一行
         for (Row row : sheet) {
@@ -145,9 +154,11 @@ class DemoApplicationTests {
 
         System.out.println("\n==========================================\n");
 
-        /**
+        */
+/**
          * 方式2 普通for
-         */
+         *//*
+
 
         // 获取最后一行
         int lastRowNum = sheet.getLastRowNum();
@@ -188,11 +199,13 @@ class DemoApplicationTests {
     }
 
 
-    /**
+    */
+/**
      * 导入 第二版 把 Excel 里面的 NUMERIC 类型转化 更加详细的 类型
      *
      * @throws IOException
-     */
+     *//*
+
     @Test
     public void testSimpleRead2() throws IOException {
 
@@ -232,12 +245,14 @@ class DemoApplicationTests {
     }
 
 
-    /**
+    */
+/**
      * 提供POI数据类型 到 Java数据类型的转换，最终都返回String
      *
      * @param cell
      * @return
-     */
+     *//*
+
 
     private String getValue(Cell cell) {
 
@@ -286,12 +301,14 @@ class DemoApplicationTests {
 
     }
 
-    /**
+    */
+/**
      * 第一版  导出 excel  没有把number的类型转化为时间
      *
      * @throws IOException
      * @throws ParseException
-     */
+     *//*
+
     @Test
     public void testSimpleWrite() throws IOException, ParseException {
 
@@ -344,12 +361,14 @@ class DemoApplicationTests {
         private Boolean isMainlandChina;
     }
 
-    /**
+    */
+/**
      * 第二版  导出
      *
      * @throws IOException
      * @throws ParseException
-     */
+     *//*
+
     @Test
     public void testSimpleWrite2() throws IOException, ParseException {
         // 创建工作薄
@@ -417,9 +436,11 @@ class DemoApplicationTests {
 
     }
 
-    /**
+    */
+/**
      * 按模板样式导出Excel
-     */
+     *//*
+
 
     @Test
     public void testWriteWithStyle() throws IOException, ParseException {
@@ -488,10 +509,12 @@ class DemoApplicationTests {
             addressCell.setCellStyle(cellStyles[2]);
 
 
-            /**
+            */
+/**
              * 你可能有疑问，这里是日期类型，是不是要和上一次一样，设置单元格样式为日期类型？
              * 这回不用了，因为上面已经拷贝了模板的样式，生日一栏就是按日期类型展示的
-             */
+             *//*
+
             XSSFCell birthdayCell = row.createCell(3);
             birthdayCell.setCellValue(student.getBirthday());
             birthdayCell.setCellStyle(cellStyles[3]);
@@ -515,11 +538,13 @@ class DemoApplicationTests {
     }
 
 
-    /**
+    */
+/**
      * 测试 几种读取文件流的方式：
      *
      * @throws IOException
-     */
+     *//*
+
     @Test
     public void testResourceRead() throws IOException {
 
@@ -545,12 +570,14 @@ class DemoApplicationTests {
     }
 
     //=================================================================ce===== 测试 导入导出到此结束=================================
-    /**
+    */
+/**
      * 最简单的读
      * <p>1. 创建excel对应的实体对象 参照{@link DemoData}
      * <p>2. 由于默认一行行的读取excel，所以需要创建excel一行一行的回调监听器，参照{@link DemoDataListener}
      * <p>3. 直接读即可
-     */
+     *//*
+
     @Test
     public void simpleRead() {
         // 有个很重要的点 DemoDataListener 不能被spring管理，要每次读取excel都要new,然后里面用到spring可以构造方法传进去
@@ -560,7 +587,8 @@ class DemoApplicationTests {
         EasyExcel.read(fileName, DemoData.class, new DemoDataListener()).sheet().doRead();
 
         // 写法2：
-       /* fileName = TestFileUtil.getPath() + "demo" + File.separator + "demo.xlsx";
+       */
+/* fileName = TestFileUtil.getPath() + "demo" + File.separator + "demo.xlsx";
         ExcelReader excelReader = null;
         try {
             excelReader = EasyExcel.read(fileName, DemoData.class, new DemoDataListener()).build();
@@ -571,7 +599,8 @@ class DemoApplicationTests {
                 // 这里千万别忘记关闭，读的时候会创建临时文件，到时磁盘会崩的
                 excelReader.finish();
             }
-        }*/
+        }*//*
+
     }
 
     //=================================================================ce===== 测试 设计用户评论表=================================
@@ -598,7 +627,8 @@ class DemoApplicationTests {
 
 
 
-            /**
+            */
+/**
              * 归纳评论：对文章的评论是第一级，对文章的评论的评论是第二级，把第二级评论塞到对应的第一级评论下，作为replies
              * 《静夜思》
              * 床前明月光
@@ -610,7 +640,8 @@ class DemoApplicationTests {
              * c：第一级评论2
              *   c 回复 d：第二级评论3
              *   d 回复 c：第二级评论4
-             */
+             *//*
+
 
             if (twoCom.getPid() == 0) {
                 // 一级评论
@@ -638,7 +669,8 @@ class DemoApplicationTests {
    // ================================qq 邮件模板 =======================================================
 
 
-    /*@Test
+    */
+/*@Test
     public void sendResumeNotify() {
         MimeMessage message = javaMailSender.createMimeMessage();
 
@@ -710,7 +742,8 @@ class DemoApplicationTests {
 
         }
 
-    }*/
+    }*//*
+
 
 //"===============================================================redis 锁   先启动redis 服务=============================================================================\n"
     @Test
@@ -721,7 +754,8 @@ class DemoApplicationTests {
         TimeUnit.SECONDS.sleep(200);
     }
 
-    /**锁的逻辑写死，不由我们判断
+    */
+/**锁的逻辑写死，不由我们判断
      * 但如果调用者不希望阻塞呢？他有可能想着：如果加锁失败，我就直接放弃。
      * 是啊，毕竟尝试加锁的目的可能完全相反：
      * • 在保证线程安全的前提下，尽量让所有线程都执行成功
@@ -734,17 +768,20 @@ class DemoApplicationTests {
      * • ...
      * 但lock、lock(leaseTime, timeUnit)替我们写死了：阻塞等待。即使lock(leaseTime, unit)，其实也是阻塞等待，只不过不会像lock()一样不断续期。
      * 究其原因，主要是lock()这些方法对于加锁失败的判断是在内部写死的：
-     */
+     *//*
+
     public void testLockOne(){
         try {
             RLock lock = redissonClient.getLock("bravo1988_distributed_lock");
             log.info("testLockOne尝试加锁...");
                     //方法一
                     //自己判断获取锁失败的逻辑
-              /*      boolean b = lock.tryLock();
+              */
+/*      boolean b = lock.tryLock();
                     if (b) {
                         // 业务操作...
-                    }*/
+                    }*//*
+
 
             //方法二
             // 调用立即结束，不阻塞
@@ -778,3 +815,4 @@ class DemoApplicationTests {
 
 
 }
+*/

@@ -1,0 +1,65 @@
+    反射API
+    没啥好说的，在日常开发中反射最终目的主要两个：
+    ● 创建实例
+    ● 反射调用方法
+    创建实例
+    创建实例的难点在于，很多人不知道clazz.newInstance()底层还是调用Contructor对象的newInstance()，
+    所以，要想调用clazz.newInstance()，必须保证编写类的时候有个无参构造，
+    否则就要先获取对应的Constructor。
+
+
+    讲完反射如何创建实例，我们再聊聊第二点：反射调用方法。难点有两个，初学者可能会不理解。
+    先来理清楚Class、Field、Method、Constructor四个对象的关系：
+    Class 里面 又有 Field、Method、Constructor三个对象
+    上面讲过了，Field、Method、Constructor对象内部有对字段、方法、构造器更详细的描述：
+    OK，理清关系后我们正式来研究如何利用反射调用方法。
+    ● 难点一：为什么根据Class对象获取Method时，需要传入方法名+参数的Class类型？
+    也就是Class#getMethod()为什么需要methodName和ParameterType？
+    这是因为.class文件中通常有不止一个方法，比如：
+
+    所以必须传入name，以明确本次需要调用的方法，得到该方法对应的Method对象。
+
+    OK，明白了。但是参数parameterTypes为什么要用Class类型，像调用普通方法那样直接传变量名不行吗，比如getUserByName(username)。
+
+    答案是：JVM判定方法重载的依据是参数列表，包括参数类型及参数个数，但不包括变量名：
+    User getUser(String userName, int age); User getUser(String mingzi, int nianling);
+    仅仅是变量名不同不叫重载，本质是同一个方法。
+
+    你可能还不死心，可能会追问：变量名不行，那我能不能传String, int。
+
+    不好意思，这些都是基本类型和引用类型，类型不能用来传递（你见过方法传参传一个String、Int的吗）。我们能传递的要么值，要么对象（引用）。而String.class, int.class是对象，且是Class对象。
+
+    从方法设计的角度，方法对应Method，方法的参数对应String.class、int.class才是对等的。
+
+    实际上，调用Class对象的getMethod()方法时，内部会循环遍历所有Method，然后根据方法名methodName和参数类型parameterType匹配唯一的Method返回：
+
+
+
+
+    ● 难点二：调用method.invoke(obj, args)时为什么要传入一个目标对象？
+
+    上面分析过，.class文件通过IO被加载到内存后，JDK创造了至少四个对象：Class、Field、Method、Constructor，这些对象其实都是0101010的抽象表示。
+
+    以Method对象为例，它到底是什么，怎么来的？
+
+    我们上面已经分析过，Method对象有好多字段，比如name（方法名），returnType（返回值类型）等。也就是说我们在.java文件中写的方法，被“解构”为一个个Method对象，即对象本身是一个方法的映射，一个方法对应一个Method对象。
+
+    我在专栏的另一篇文章中讲过，对象的本质就是用来存储数据的，而方法作为一种行为描述，是所有对象共有的，不属于某个对象独有。比如现有两个Person实例：
+
+
+    Person p1 = new Person();
+    Person p2 = new Person();
+
+对象 p1保存了"hst"和18，p2保存了"cxy"和20，但是不管是p1还是p2，都会有changeUser()，而每个对象里面写一份太浪费。既然是共性行为，可以抽取出来，放在方法区共用。但这又产生了一个棘手的问题，方法是共用的，JVM如何保证p1调用changeUser()时，changeUser()不会跑去把p2的数据改掉呢？
+
+所以JVM设置了一种隐性机制，每次对象调用方法时，都会隐性传递当前调用该方法的对象参数，方法可以根据这个对象参数知道当前调用本方法的是哪个对象！
+
+
+同样的，在反射调用方法时，本质还是希望方法处理数据，所以必须告诉它去处理哪个对象的数据。
+大家仔细看，就会更加理解什么是反射：
+● 黑色细线是正向方法调用
+● 绿色粗线是反射方法调用
+
+所以，最好把Method理解为方法执行指令吧，它更像是一个方法执行器，必须告诉它要执行的对象（数据）。当然，如果是invoke一个静态方法，不需要传入具体的对象，因为静态方法是属于类的。
+大家有没有看过成龙的《醉拳》，酒鬼师傅为了教成龙功夫，用两根竹竿拴住他的双手，操作他做出各种招式。Method也是如此，原本是对象自己调用方法，现在则是反射调用方法。但前提是，必须要有对象。
+

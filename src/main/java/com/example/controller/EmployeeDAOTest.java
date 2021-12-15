@@ -6,6 +6,7 @@ import com.example.annotation.MyTest;
 
 /**
  * 和我们平时使用Junit测试时一样
+ * 简化版的aop 测试用例
  *
  * @author qiyu
  */

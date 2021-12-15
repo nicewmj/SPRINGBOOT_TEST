@@ -1,8 +1,17 @@
 package com.example.pattern23.factory工厂模式;
 
+import com.baomidou.mybatisplus.extension.api.R;
+import com.example.entity.User;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+
+import static jdk.nashorn.internal.runtime.ScriptRuntime.apply;
 
 /**
  * 比如，原本工程中有个查询外部商品的接口：

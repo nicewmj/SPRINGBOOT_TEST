@@ -159,11 +159,11 @@
 
         <!--reids锁的依赖-->
         <!--大家也可以单独引入Redisson依赖，然后通过@Configuration自己配置RedissonClient-->
-        <dependency>
-            <groupId>org.redisson</groupId>
-            <artifactId>redisson-spring-boot-starter</artifactId>
-            <version>3.13.6</version>
-        </dependency>
+        <!--<dependency>-->
+            <!--<groupId>org.redisson</groupId>-->
+            <!--<artifactId>redisson-spring-boot-starter</artifactId>-->
+            <!--<version>3.13.6</version>-->
+        <!--</dependency>-->
             <!--junit  @Test使用-->
         <dependency>
             <groupId>junit</groupId>

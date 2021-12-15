@@ -10,6 +10,9 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * 合并流  flatMap
+ */
 public class StreamTest2 {
 
     private static List<Person> list;

@@ -13,6 +13,9 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * 测试redis 的map，java 对象序列化存储
+ */
 @RestController
 public class RedisController {
 

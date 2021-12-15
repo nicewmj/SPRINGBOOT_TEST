@@ -8,6 +8,16 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * | controller
+ *      -EmployeeDAOTest
+ *
+ *  测试读取注解 并实现操作
+ *
+ *      1;获取class文件，并实例化对象     EmployeeDAOTest.class;  classzz.newInstance();
+ *      2;通过class文件获取 所有方法      classzz.getMethods()
+ *      3;便利所有方法，判断方法上使用哪些注解          method.isAnnotationPresent(MyBefore.class)
+ */
 public class MyJunitFrameWork {
     /**
      * 这个就是注解三部曲中最重要的：读取注解并操作

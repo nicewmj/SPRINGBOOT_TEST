@@ -1,2 +1,13 @@
 1：在 测试类  test -》 DemoApplicationTests 类下面 运行报错 java.lang.IllegalStateException: Failed to load ApplicationContext
     是因为注入了redis相关的依赖  ，所以先启动redis 服务
+
+
+ 2： redis服务器起来了，但是 redission 报错  把依赖注释掉
+
+ <!--reids锁的依赖-->
+            <!--大家也可以单独引入Redisson依赖，然后通过@Configuration自己配置RedissonClient-->
+            <!--<dependency>-->
+                <!--<groupId>org.redisson</groupId>-->
+                <!--<artifactId>redisson-spring-boot-starter</artifactId>-->
+                <!--<version>3.13.6</version>-->
+            <!--</dependency>-->

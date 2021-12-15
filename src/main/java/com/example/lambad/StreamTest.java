@@ -7,8 +7,14 @@ import lombok.NoArgsConstructor;
 
 import javax.swing.*;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
+/**
+ *
+ * 流的基本用法 过滤 排序 求和 最大最小值
+ */
 public class StreamTest {
     private static List<Person> list;
 
@@ -22,6 +28,12 @@ public class StreamTest {
 
     public static void main(String[] args) {
 
+//        过滤出年龄大于等于18 并且 月薪大于等于888.8 并且 来自杭州的Person
+        //自己写了 判断的方法方便引用，逻辑清晰
+        List<Person> collect14 = list.stream().filter(StreamTest::isHasMoney).collect(Collectors.toList());
+
+        List<String> collect12 = list.stream().filter(p -> p.getAge() > 20).map(Person::getName).collect(Collectors.toList());
+        System.out.println(collect12);
         /**
          * 所以collect()、Collector、Collectors三者的关系是：
          * collect()通过传入不同的Collector对象来明确如何收集元素，
@@ -84,7 +96,6 @@ public class StreamTest {
 
         System.out.println("limit/skip  分割 跳过 " + collect);
 
-
         //二    collect
         //        collect()是最重要、最难掌握、同时也是功能最丰富的方法。
         //        最常用的4个方法：Collectors.toList()、Collectors.toSet()、Collectors.toMap()、Collectors.joining()
@@ -109,7 +120,7 @@ public class StreamTest {
          * Map<String, Person> nameToPersonMap = list.stream().collect(Collectors.toMap(Person::getName, Function.identity());
          * 但它依然没有解决key冲突的问题，而且对于大部分人来说，相比person->person，Function.identity()的可读性不佳。
          */
-
+list.stream().collect(Collectors.toMap(Person::getName,p->p,(k,v)->k));//key 冲突
 
         Map<String, Person> map = list.stream().collect(Collectors.toMap(Person::getName, person -> person));
         System.out.println(" 把结果收集为Map " + map);
@@ -119,7 +130,6 @@ public class StreamTest {
         System.out.println(" 把结果收集起来，并用指定分隔符拼接 " + joiningCollect);
 
         // 五类：聚合：max/min/count   最大 最小 统计
-
         // 匿名内部类的方式，实现Comparator，明确按什么规则比较（所谓最大，必然是在某种规则下的最值）
         Optional<Integer> max = list.stream().map(Person::getAge).max(new Comparator<Integer>() {
             @Override
@@ -145,7 +155,8 @@ public class StreamTest {
         System.out.println("高阶操作 最小 方法引用 collect " + collect3.orElse(null));
         Optional<Person> min = list.stream().min(Comparator.comparing(Person::getAge));
         System.out.println("高阶操作 最小 方法引用 collect " + min.orElse(null));
-
+        Long collect13 = list.stream().collect(Collectors.counting());
+        System.out.println("统计计数====>> "+collect13);
         /**
          *  六类  去重：distinct
          *
@@ -154,7 +165,6 @@ public class StreamTest {
          * distinct()提供的去重功能比较简单，就是判断对象重复。如果希望实现更细粒度的去重，比如根据对象的某个属性去重，可以怎么做呢？
          *  https://www.jianshu.com/p/32daa76ea23f
          */
-
         List<String> count = list.stream().map(Person::getAddress).distinct().collect(Collectors.toList());//地址去重
         List<Person> collect1 = list.stream().map(person -> person).distinct().collect(Collectors.toList());//对象去重
         System.out.println("去重 " + count);
@@ -162,7 +172,29 @@ public class StreamTest {
 
         /**
          *  分组
-         *
+         *groupingBy()的最终结果是Map，key是分组的字段，value是属于该分组的所有元素集合，默认是List。
+         * 因为groupingBy()也是有局限性的，它不能自定义“分组条件”。比如，如果你的分组条件是：
+         * ● 年龄大于18岁 && 来自杭州 的分为一组
+         * ● 其他的分为另一组
+         * 支持自定义分组条件的partitioningBy()就派上用场：
+         * partitioningBy()也返回Map，但key是true/false，
+         * 因为条件分组的依据要么true、要么false。partitioningBy()也支持各种嵌套，大家自己尝试即可。
+         *  "false": [
+         *         {
+         *             "name": "i",
+         *             "age": 18,
+         *             "address": "杭州",
+         *             "salary": 999.9
+         *         }
+         *     ],
+         *     "true": [
+         *         {
+         *             "name": "iron",
+         *             "age": 21,
+         *             "address": "杭州",
+         *             "salary": 888.8
+         *         }
+         *     ]
          */
         // GROUP BY address
         Map<String, List<Person>> collect4 = list.stream().collect(Collectors.groupingBy(Person::getAddress));
@@ -176,6 +208,7 @@ public class StreamTest {
 
         // 解决了按字段分组、按多个字段分组，我们再考虑一个问题：有时我们分组的条件不是某个字段，而是某个字段是否满足xx条件
         // 比如 年龄大于等于18的是成年人，小于18的是未成年人
+
         Map<Boolean, List<Person>> collect6 = list.stream().collect(Collectors.partitioningBy(person -> person.getAge() > 18));
         System.out.println("判断并 分组 collect6" + collect6);
 
@@ -190,7 +223,6 @@ public class StreamTest {
         // 有个更绝的，针对某项数据，一次性返回多个纬度的统计结果：总和、平均数、最大值、最小值、总数，但一般用的很少
         IntSummaryStatistics collect9 = list.stream().collect(Collectors.summarizingInt(Person::getAge));
         System.out.println("一次性返回多个纬度的统计结果 " + collect9);
-
         //遍历
         // 遍历操作，接收Consumer
         list.stream().forEach(System.out::println);
@@ -219,6 +251,10 @@ public class StreamTest {
         private Integer age;
         private String address;
         private Double salary;
+    }
+
+    private static boolean isHasMoney(Person person){
+        return person.getAge()>18 && "杭州".equals(person.address) && person.getSalary()>888.8;
     }
 }
 

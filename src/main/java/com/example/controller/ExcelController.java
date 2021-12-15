@@ -28,6 +28,11 @@ import java.math.BigDecimal;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
+/**
+ *      导出用例
+ *
+ *      测试封装的 PoiExcelUtils
+ */
 @RestController
 public class ExcelController {
 
@@ -100,6 +105,7 @@ public class ExcelController {
                     /*
                      * 无论Excel中是58还是58.0，数值类型在POI中最终都被解读为Double。
                      * 这里的解决办法是通过BigDecimal先把Double先转成字符串，如果是.0结尾，把.0去掉
+                     * 如果是 3.098呢   还是辉截取吗？
                      * */
                     String strCell = "";
                     Double num = cell.getNumericCellValue();

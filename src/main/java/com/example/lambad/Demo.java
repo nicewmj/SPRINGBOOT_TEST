@@ -8,6 +8,14 @@ import java.util.stream.Collectors;
 
 public class Demo {
     public static void main(String[] args) {
+
+        //可以把实例传进去，测试
+/*
+       ByAir byAir =new ByAir();
+       new  MyThread(byAir).start();
+*/
+
+
 //        new MyThread(() -> {
 //            System.out.println("不用买票");
 //            System.out.println("骑电瓶车...");
@@ -17,10 +25,10 @@ public class Demo {
 //            String str1 = "abc";
 //            String str2 = "abcd";
 //            int i = compareString(str1, str2, Comparator.comparingInt(String::length));
-
-        List<Integer> list = new ArrayList<>(Arrays.asList(1, 2, 3));
+        List<Integer> list = new ArrayList<>(Arrays.asList(1,2,3,4,5));
         List<Integer> collect = list.stream().filter(s -> s > 2).collect(Collectors.toList());
         System.out.println(collect);
+
 
 
     }
